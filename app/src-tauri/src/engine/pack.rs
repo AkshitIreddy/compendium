@@ -140,6 +140,22 @@ pub fn load_pack(path: &Path) -> Result<Arc<LoadedPack>> {
             .unwrap_or_default(),
     };
 
+    // Query embeddings must match the pack's model/dims exactly — a pack
+    // built with a different embedding setup would produce silent garbage
+    // similarity scores, so refuse to load it.
+    if manifest.embedding_dims != crate::engine::cohere::EMBED_DIMS
+        || manifest.embedding_model != crate::engine::cohere::EMBED_MODEL
+    {
+        return Err(Error::Pack(format!(
+            "pack '{}' was built with {} @ {} dims; this app queries with {} @ {} dims",
+            manifest.pack_id,
+            manifest.embedding_model,
+            manifest.embedding_dims,
+            crate::engine::cohere::EMBED_MODEL,
+            crate::engine::cohere::EMBED_DIMS,
+        )));
+    }
+
     let dims = manifest.embedding_dims;
     let technique_count: i64 =
         conn.query_row("SELECT COUNT(*) FROM techniques", [], |r| r.get(0))?;
@@ -286,16 +302,28 @@ pub fn blob_to_f32(blob: &[u8], dims: usize) -> Result<Vec<f32>> {
         .collect())
 }
 
-/// Discover pack files: every *.pack in the packs directory.
+/// Discover pack files: every *.pack in the packs directory, including one
+/// level of subdirectories (Tauri's bundler nests mapped resource dirs, so
+/// installed packs may live at resources/packs/packs/*.pack).
 pub fn discover_packs(dir: &Path) -> Vec<PathBuf> {
-    let Ok(entries) = std::fs::read_dir(dir) else {
-        return Vec::new();
-    };
-    let mut paths: Vec<PathBuf> = entries
-        .filter_map(|e| e.ok())
-        .map(|e| e.path())
-        .filter(|p| p.extension().is_some_and(|ext| ext == "pack"))
-        .collect();
+    fn packs_in(dir: &Path) -> Vec<PathBuf> {
+        std::fs::read_dir(dir)
+            .into_iter()
+            .flatten()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|ext| ext == "pack"))
+            .collect()
+    }
+    let mut paths = packs_in(dir);
+    if let Ok(entries) = std::fs::read_dir(dir) {
+        for entry in entries.filter_map(|e| e.ok()) {
+            if entry.path().is_dir() {
+                paths.extend(packs_in(&entry.path()));
+            }
+        }
+    }
     paths.sort();
+    paths.dedup();
     paths
 }

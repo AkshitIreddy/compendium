@@ -175,6 +175,9 @@ pub fn search(
         }
         // Ontology-informed list: techniques addressing the top matched failure
         // modes join the card fusion as their own ranked voice (S0 feeding S3).
+        // Dedup preserves RRF's one-contribution-per-list semantics for
+        // techniques linked to several matched failure modes.
+        let mut seen_keys = std::collections::HashSet::new();
         let ontology_list: Vec<u64> = fm_hits
             .iter()
             .take(3)
@@ -185,6 +188,7 @@ pub fn search(
                     .find(|(_, s)| *s == slug)
                     .map(|(k, _)| *k)
             })
+            .filter(|k| seen_keys.insert(*k))
             .collect();
         if !ontology_list.is_empty() {
             card_lists.push(ontology_list);
@@ -281,8 +285,12 @@ pub fn search(
 
         // ---- 1-hop typed-graph expansion from the top cards
         if opts.expand_graph {
-            let present: std::collections::HashSet<String> =
-                all_cards.iter().map(|c| c.slug.clone()).collect();
+            // Keyed by (pack, slug) and updated as expansions land, so a
+            // neighbor shared by two parents is added exactly once.
+            let mut present: std::collections::HashSet<(String, String)> = all_cards
+                .iter()
+                .map(|c| (c.pack_id.clone(), c.slug.clone()))
+                .collect();
             let top_slugs: Vec<(String, f64)> = all_cards
                 .iter()
                 .filter(|c| c.pack_id == pack_id)
@@ -308,7 +316,7 @@ pub fn search(
                     ))
                 })?;
                 for n in neighbors.filter_map(|n| n.ok()) {
-                    if present.contains(&n.0) {
+                    if !present.insert((pack_id.clone(), n.0.clone())) {
                         continue;
                     }
                     all_cards.push(CardHit {

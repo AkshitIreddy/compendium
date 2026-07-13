@@ -103,10 +103,11 @@ pub fn key_delete(state: State<'_, AppState>) -> Result<()> {
 pub async fn search_query(state: State<'_, AppState>, query: String) -> Result<SearchResponse> {
     let query_vec = if state.cohere.has_key() {
         match state.cohere.embed_queries(&[query.clone()]).await {
-            Ok(mut v) => {
+            Ok(mut v) if !v.is_empty() => {
                 appdb::quota_bump(&state.appdb.lock(), 1, 0, 0)?;
                 Some(v.remove(0))
             }
+            Ok(_) => None, // degenerate empty embedding response → local mode
             // Degrade to local-only rather than failing the whole search.
             Err(Error::QuotaExhausted) | Err(Error::NoApiKey) => None,
             Err(e) => return Err(e),

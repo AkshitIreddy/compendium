@@ -815,7 +815,7 @@ fn corrective_requery(
     missing: &[&SufficiencyVerdict],
     evidence: &mut Vec<Evidence>,
 ) {
-    let have: HashSet<String> = evidence.iter().map(|e| e.doc_key.clone()).collect();
+    let mut have: HashSet<String> = evidence.iter().map(|e| e.doc_key.clone()).collect();
     let mut added = 0;
     for verdict in missing {
         let query = verdict
@@ -825,7 +825,7 @@ fn corrective_requery(
         if let Ok(resp) = search::search(packs, &query, None, SearchOptions::default()) {
             for hit in resp.chunks.into_iter().take(3) {
                 let key = format!("{}:chunk:{}", hit.pack_id, hit.chunk_id);
-                if have.contains(&key) || added >= 6 {
+                if added >= 6 || !have.insert(key.clone()) {
                     continue;
                 }
                 evidence.push(Evidence {
