@@ -7,6 +7,15 @@ node_modules/
 dist/
 target/
 
+# Python pipeline
+pipeline/.venv/
+pipeline/.cache/
+__pycache__/
+*.pyc
+
+# Built pack artifacts (shipped via installer, not the repo)
+packs-out/
+
 # OS noise
 Thumbs.db
 Desktop.ini
