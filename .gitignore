@@ -1,0 +1,12 @@
+# Secrets
+.env
+cohere_keys.txt
+
+# Dependencies / build output (populated in later phases)
+node_modules/
+dist/
+target/
+
+# OS noise
+Thumbs.db
+Desktop.ini
