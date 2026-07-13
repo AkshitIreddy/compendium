@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { listen } from "@tauri-apps/api/event";
+import { listenAppEvent } from "./lib/events";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ipc } from "./lib/ipc";
 import type {
@@ -60,10 +60,10 @@ export default function App() {
       })
       .catch(() => {});
 
-    const unlistenProgress = listen<ProgressEvent>("advisor-progress", (e) => {
-      setStage(e.payload.stage);
+    const unlistenProgress = listenAppEvent<ProgressEvent>("advisor-progress", (p) => {
+      setStage(p.stage);
     });
-    const unlistenTitle = listen("conversation-titled", () => refreshConversations());
+    const unlistenTitle = listenAppEvent("conversation-titled", () => refreshConversations());
     return () => {
       void unlistenProgress.then((f) => f());
       void unlistenTitle.then((f) => f());

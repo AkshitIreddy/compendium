@@ -1,6 +1,9 @@
 // Typed wrappers over every Tauri command — the single place the string
-// command names live.
+// command names live. Under ?demo=1 every call is served by the demo layer
+// (canned real data) instead of the Rust backend.
 import { invoke } from "@tauri-apps/api/core";
+import { isDemo } from "./events";
+import { demoIpc } from "./demo";
 import type {
   AdvisorTurn,
   ConversationDetail,
@@ -13,7 +16,7 @@ import type {
   Tier,
 } from "./types";
 
-export const ipc = {
+const realIpc = {
   packsList: () => invoke<PackInfo[]>("packs_list"),
 
   keyStatus: () => invoke<KeyStatus>("key_status"),
@@ -52,3 +55,5 @@ export const ipc = {
 
   quotaGet: () => invoke<Quota>("quota_get"),
 };
+
+export const ipc: typeof realIpc = isDemo ? (demoIpc as unknown as typeof realIpc) : realIpc;
