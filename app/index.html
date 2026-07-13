@@ -1,10 +1,18 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="graphite" data-density="cozy" data-motion="full">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Compendium</title>
+    <script>
+      // Pre-paint theme resolution: real settings apply after React mounts;
+      // this only prevents an unthemed first frame.
+      try {
+        if (!window.matchMedia("(prefers-color-scheme: dark)").matches)
+          document.documentElement.dataset.theme = "porcelain";
+      } catch (e) {}
+    </script>
   </head>
 
   <body>

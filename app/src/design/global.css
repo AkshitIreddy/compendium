@@ -79,6 +79,8 @@ kbd {
 /* Motion-safe utility: components animate through these custom props so a
    single token collapses all motion to zero. */
 .transition-token {
+  transition-property: color, background-color, border-color, opacity,
+    transform, box-shadow;
   transition-duration: var(--dur-fast);
   transition-timing-function: var(--ease-out);
 }
