@@ -18,10 +18,16 @@ see [docs/PLAN.md](docs/PLAN.md).
   user's queries (Cohere API, user's own key).
 - **v1 packs**: RAG techniques (from
   [NirDiamant/RAG_Techniques](https://github.com/NirDiamant/RAG_Techniques)) and
-  LangChain/LangGraph documentation. The core is pack-agnostic; new subject areas are
-  added as new packs without touching the engine.
-- **Stack**: Tauri 2 (Rust engine: local hybrid vector + BM25 search, agentic advisor
-  loop, secure key storage) + React 19 (design-token UI with first-class accessibility).
+  framework docs (LangChain + LangGraph + LangSmith). The core is pack-agnostic; new
+  subject areas are added as new packs without touching the engine.
+- **Agentic engine**: a 10-stage advisor pipeline (ontology-guided intake → planned
+  multi-query hybrid retrieval with graph expansion → rerank/diversity selection →
+  sufficiency grading → per-section grounded synthesis with span citations →
+  claim-level verification) in three quality tiers — composed from the best method
+  per stage; the app implements many of the very techniques it recommends.
+- **Stack**: Tauri 2 (Rust engine: usearch HNSW + SQLite FTS5 hybrid search, the
+  advisor state machine, secure key storage) + React 19 (design-token UI with
+  first-class accessibility).
 
 ## Repository layout
 
