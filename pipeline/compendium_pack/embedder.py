@@ -81,6 +81,7 @@ class Embedder:
             "embedding_types": ["float"],
             "output_dimension": self.dims,
         }
+        last_failure = "no attempt made"
         for attempt in range(6):
             try:
                 r = requests.post(
@@ -90,17 +91,19 @@ class Embedder:
                     timeout=300,
                 )
             except requests.exceptions.RequestException as e:
-                print(f"  embed attempt {attempt + 1}: {type(e).__name__}; retrying")
+                last_failure = type(e).__name__
+                print(f"  embed attempt {attempt + 1}: {last_failure}; retrying")
                 time.sleep(2**attempt)
                 continue
             if r.status_code in RETRY_STATUSES:
-                print(f"  embed attempt {attempt + 1}: HTTP {r.status_code}; retrying")
+                last_failure = f"HTTP {r.status_code}"
+                print(f"  embed attempt {attempt + 1}: {last_failure}; retrying")
                 time.sleep(2**attempt)
                 continue
             r.raise_for_status()
             self.api_calls += 1
             floats = r.json()["embeddings"]["float"]
-            if any(len(v) != self.dims for v in floats):
-                raise RuntimeError("embedding dims mismatch from API")
+            if len(floats) != len(texts) or any(len(v) != self.dims for v in floats):
+                raise RuntimeError("embedding count/dims mismatch from API")
             return [np.asarray(v, dtype=np.float32) for v in floats]
-        raise RuntimeError(f"embed failed after retries (last status {r.status_code})")
+        raise RuntimeError(f"embed failed after retries (last failure: {last_failure})")

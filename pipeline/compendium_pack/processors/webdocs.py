@@ -40,17 +40,20 @@ PREAMBLE_RE = re.compile(
 
 
 def _fetch(url: str, session: requests.Session, tries: int = 4) -> requests.Response:
+    last: requests.Response | None = None
     for attempt in range(tries):
         try:
-            r = session.get(url, timeout=60, headers={"User-Agent": UA})
+            last = session.get(url, timeout=60, headers={"User-Agent": UA})
         except requests.exceptions.RequestException:
             time.sleep(2**attempt)
             continue
-        if r.status_code in (429, 500, 502, 503, 504):
+        if last.status_code in (429, 500, 502, 503, 504):
             time.sleep(2**attempt)
             continue
-        return r
-    return r
+        return last
+    if last is None:
+        raise RuntimeError(f"network failure after {tries} attempts: {url}")
+    return last
 
 
 def _sitemap_urls(base: str, session: requests.Session) -> list[str]:
@@ -203,6 +206,15 @@ def process(recipe, source_dir: Path) -> ProcessedPack:
         if r.status_code == 404:
             raise RuntimeError(f"allowlisted page 404s: {url} — fail loudly, review allowlist")
         r.raise_for_status()
+        # A 200 serving the SPA shell / an HTML error page must not be embedded.
+        content_type = r.headers.get("Content-Type", "")
+        body_head = r.text.lstrip()[:200].lower()
+        if "markdown" not in content_type and (
+            body_head.startswith("<!doctype") or body_head.startswith("<html")
+        ):
+            raise RuntimeError(
+                f"page returned HTML instead of markdown (Content-Type: {content_type}): {url}"
+            )
         md = PREAMBLE_RE.sub("", r.text).strip()
         cache_file.write_text(md, encoding="utf-8")
         fetched_hashes[url] = hashlib.sha256(md.encode()).hexdigest()

@@ -194,8 +194,12 @@ def _walk_segments(nb, title: str) -> list[_Segment]:
             if PROMO_RE.search(src):
                 continue
             buf: list[str] = []
+            in_fence = False
             for line in src.splitlines():
-                m = HEADER_RE.match(line)
+                if line.lstrip().startswith("```"):
+                    in_fence = not in_fence
+                # '#' lines inside fenced code are comments, not headers
+                m = None if in_fence else HEADER_RE.match(line)
                 if m:
                     if buf and "".join(buf).strip():
                         segments.append(_Segment(path(), "\n".join(buf).strip(), idx, False))
@@ -257,7 +261,8 @@ def _chunk_segments(segments: list[_Segment], slug: str) -> list[Chunk]:
         if merged and len(c.body) < MIN_MERGE_CHARS:
             prev = merged[-1]
             prev.body += "\n\n" + c.body
-            prev.last_cell = max(prev.last_cell, c.last_cell)
+            if "cells" in prev.location and "cells" in c.location:
+                prev.location["cells"][1] = max(prev.location["cells"][1], c.location["cells"][1])
             if prev.kind != c.kind:
                 prev.kind = "mixed"
         else:

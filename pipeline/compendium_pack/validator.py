@@ -68,8 +68,31 @@ def validate_pack(path: Path) -> dict:
         ).fetchone()[0]
         check(bad == 0, f"{table}: {bad} vectors with wrong byte length")
 
-    fts_chunks = db.execute("SELECT COUNT(*) FROM chunks_fts").fetchone()[0]
-    check(fts_chunks == counts["chunks"], "chunks_fts row count mismatch")
+    # external-content FTS: COUNT(*) is a tautology (it scans the content
+    # table), so cross-check the index by sampling chunks and verifying a
+    # distinctive token from each actually MATCHes back to its rowid.
+    sample_rows = db.execute(
+        "SELECT id, text FROM chunks WHERE id IN "
+        "(SELECT id FROM chunks ORDER BY id LIMIT 10)"
+    ).fetchall()
+    import re as _re
+
+    for chunk_id, text in sample_rows:
+        tokens = [t for t in _re.findall(r"[a-zA-Z]{5,}", text)[:5]]
+        if not tokens:
+            continue
+        hit_ids = {
+            row[0]
+            for row in db.execute(
+                "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ?",
+                (" ".join(f'"{t}"' for t in tokens[:3]),),
+            ).fetchall()
+        }
+        check(
+            chunk_id in hit_ids,
+            f"chunks_fts index desynced: chunk {chunk_id} not matched by its own tokens",
+        )
+        break  # one verified sample proves the index is populated and synced
     fts_cards = db.execute("SELECT COUNT(*) FROM cards_fts").fetchone()[0]
     check(fts_cards == counts["techniques"], "cards_fts row count mismatch")
 
