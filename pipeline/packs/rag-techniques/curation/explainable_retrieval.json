@@ -1,0 +1,73 @@
+{
+  "slug": "explainable_retrieval",
+  "title": "Explainable Retrieval",
+  "one_liner": "Attach an LLM-generated natural-language explanation to every retrieved chunk, stating why it is relevant to the query.",
+  "stage": "post-retrieval",
+  "problem_solved": "Vector retrieval is a black box: users and developers see which chunks came back but not why, which undermines trust, makes retrieval bugs hard to diagnose, and blocks adoption in domains (legal, medical, compliance) where the reasoning behind evidence selection matters as much as the evidence itself.",
+  "failure_modes": [
+    "I can't tell why the retriever returned these chunks for my query (black-box similarity search)",
+    "Users don't trust the RAG system's answers because there is no visible justification for the sources it used",
+    "Debugging poor retrieval quality is guesswork because similarity scores alone don't explain relevance",
+    "Stakeholders in regulated or high-stakes domains (legal, medical, audit) require a stated rationale for every piece of retrieved evidence",
+    "Irrelevant chunks slip into the context window unnoticed because nothing surfaces their weak connection to the query"
+  ],
+  "when_to_use": [
+    "You are building a user-facing search or RAG UI where showing 'why this result' next to each hit increases trust and usability",
+    "You are debugging or tuning a retrieval pipeline and want human-readable diagnostics of query-chunk relationships instead of raw cosine scores",
+    "Your domain demands auditable evidence trails (legal research, medical information systems, compliance review, education)",
+    "You want a lightweight relevance-judgment layer whose output can also feed downstream filtering or reranking decisions",
+    "Query volume is low or the flow is interactive/analyst-driven, so k extra LLM calls per query are acceptable"
+  ],
+  "tradeoffs": [
+    "Adds one LLM call per retrieved document per query (k=5 means 5 extra calls), so cost and latency scale linearly with k — poor fit for high-throughput or latency-sensitive production paths",
+    "Explanations are post-hoc LLM rationalizations of the match, not faithful accounts of the embedding similarity that actually drove retrieval; they can sound convincing for genuinely irrelevant chunks",
+    "Does not improve recall or precision at all — the underlying retrieval is a plain FAISS top-k; if retrieval is bad you get well-written explanations of bad results",
+    "Explanations are generated sequentially per document in the notebook, compounding latency (parallelization is left to the adopter)",
+    "Skip it when users only need answers, not provenance, or when a reranker score threshold already serves the filtering/debugging need more cheaply"
+  ],
+  "how_it_works": "An ExplainableRetriever class wraps a standard dense-retrieval pipeline. At index time, raw texts are embedded with OpenAIEmbeddings and stored in a FAISS vector store (FAISS.from_texts). The store is exposed as a base retriever with search_kwargs={'k': 5}. At query time, retrieve_and_explain(query) first fetches the top-5 documents via get_relevant_documents, then loops over each document and invokes an explanation chain — a PromptTemplate with input variables 'query' and 'context' piped into ChatOpenAI (gpt-4o-mini, temperature=0, max_tokens=4000) — asking the model to 'analyze the relationship between the query and the retrieved context' and explain why the context is relevant and how it helps answer the query. The method returns a list of {content, explanation} dicts. Retrieval itself (retrieval stage) is untouched; all added value is in the post-retrieval annotation step. The notebook's markdown mentions GPT-4 but the code actually uses gpt-4o-mini. Demonstrated on a 3-sentence mock corpus with the query 'Why is the sky blue?'.",
+  "key_dependencies": [
+    "langchain (PromptTemplate, retriever interface, LCEL pipe)",
+    "langchain-openai (OpenAIEmbeddings, ChatOpenAI)",
+    "FAISS (faiss vector store via LangChain)",
+    "OpenAI API (embeddings + gpt-4o-mini)",
+    "python-dotenv",
+    "repo helper_functions / evaluation.evalute_rag (wildcard imports)"
+  ],
+  "key_code_signals": [
+    "class ExplainableRetriever",
+    "FAISS.from_texts(texts, OpenAIEmbeddings())",
+    "self.vectorstore.as_retriever(search_kwargs={\"k\": 5})",
+    "ChatOpenAI(temperature=0, model_name=\"gpt-4o-mini\", max_tokens=4000)",
+    "PromptTemplate(input_variables=[\"query\", \"context\"], template=\"Analyze the relationship between the following query and the retrieved context...\")",
+    "self.explain_chain = explain_prompt | self.llm",
+    "retrieve_and_explain(): per-doc loop calling explain_chain.invoke({\"query\": ..., \"context\": doc.page_content})"
+  ],
+  "related_techniques": [
+    "simple_rag: prerequisite — this is a plain FAISS top-k retriever with an explanation layer bolted on",
+    "reranking: alternative/complement — a reranker scores relevance numerically and cheaply filters, while explainable retrieval justifies in natural language; explanations could feed a rerank/filter step",
+    "contextual_compression: complement — compression trims retrieved content, explanations justify keeping it; both are per-chunk post-retrieval LLM passes",
+    "self_rag: refines the same idea — Self-RAG grades retrieved documents for relevance and acts on the grade, whereas this only reports the rationale",
+    "crag: related — Corrective RAG also evaluates retrieved evidence with an LLM but uses the judgment to trigger corrective actions",
+    "retrieval_with_feedback_loop: composes — per-document explanations are natural inputs for a feedback loop that tunes retrieval over time"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "explainable retrieval",
+    "retrieval transparency",
+    "why was this chunk retrieved",
+    "relevance explanation",
+    "interpretable RAG",
+    "trust in search results",
+    "retrieval debugging",
+    "justification for retrieved documents",
+    "auditable evidence",
+    "black box vector search",
+    "LLM relevance rationale",
+    "FAISS",
+    "LangChain retriever",
+    "post-retrieval explanation"
+  ],
+  "summary": "Explainable Retrieval addresses the black-box nature of dense vector search: chunks come back ranked by opaque similarity scores, so users can't judge trust and developers can't debug relevance failures. The technique wraps a standard FAISS + OpenAI-embeddings retriever in an ExplainableRetriever class whose retrieve_and_explain method fetches the top-k (k=5) documents, then makes one gpt-4o-mini call per document with a prompt asking the model to explain why that context is relevant to the query and how it helps answer it, returning {content, explanation} pairs. It changes nothing about retrieval quality — recall and precision are identical to plain top-k — but adds human-readable provenance useful for user-facing search UIs, retrieval debugging, and regulated domains (legal, medical, compliance) that require justification for evidence. Costs: k extra LLM calls per query (sequential in the notebook), and explanations are post-hoc rationalizations that can sound plausible even for irrelevant chunks. Prefer rerankers for cheap numeric filtering; use this when the rationale itself is the deliverable. Composes naturally with relevance grading (Self-RAG, CRAG) and feedback-loop retrieval.",
+  "notes_for_chunking": "Very short notebook (~13 cells). Cell 0 is a promotional book advertisement — strip. Cell 1 is a single large markdown cell containing ALL conceptual content (Overview, Motivation, Key Components, Method Details, Benefits, Conclusion as ## sub-headers inside one cell) — split on those internal headers rather than treating the cell as atomic. Cells 2-5 are boilerplate: pip install, git clone of the repo, wildcard imports (from helper_functions import *) and dotenv setup — strip or collapse. Cell 7 is the only substantive code: the complete self-contained ExplainableRetriever class (init + retrieve_and_explain), ideal as one code chunk paired with the 'Define the explainable retriever class' header from cell 6. Cells 9 and 11 are a tiny mock-data usage demo (3 sentences, one query) with no stored outputs. Final markdown cell is a tracking-pixel image — strip. Markdown/code ratio is high; section headers are clean and descriptive; note the markdown/code mismatch (markdown says GPT-4, code uses gpt-4o-mini)."
+}

@@ -1,0 +1,76 @@
+{
+  "slug": "retrieval_with_feedback_loop",
+  "title": "Retrieval with Feedback Loop",
+  "one_liner": "Collects user relevance/quality ratings on RAG answers, uses an LLM to match past feedback to new queries for score-based re-ranking, and periodically folds highly-rated Q&A pairs back into the vector index.",
+  "stage": "post-retrieval",
+  "problem_solved": "A static RAG system never learns: it keeps retrieving the same marginal chunks and repeating the same bad answers no matter how often users signal dissatisfaction. This technique closes the loop by persisting per-answer user feedback (relevance and quality scores 1-5), using that history to re-weight and re-rank retrieved documents on future queries, and periodically enriching the vector store with query+answer text from highly-rated interactions so proven-good content becomes directly retrievable.",
+  "failure_modes": [
+    "My RAG system keeps giving the same bad or irrelevant answers to recurring questions even after users flag them",
+    "Retrieval quality never improves over time because the system has no memory of which answers users found useful",
+    "Documents that users consistently rate as unhelpful keep ranking at the top of retrieval results",
+    "Good answers the system already produced are 'lost' - the same question later retrieves worse context and regenerates a worse answer",
+    "The system cannot adapt to what my specific user group actually considers relevant versus what embedding similarity says"
+  ],
+  "when_to_use": [
+    "You run a long-lived, multi-user RAG application (support bot, internal knowledge assistant) where the same or similar questions recur and you can collect thumbs-up/down or 1-5 ratings",
+    "Users' notion of a 'good answer' diverges from raw embedding similarity and you want the ranking to drift toward observed user preference",
+    "Your knowledge base is fairly static but answer quality complaints persist - the gain must come from ranking/curation rather than new documents",
+    "You want a lightweight online-learning effect without retraining embedding models or building a learning-to-rank pipeline",
+    "You already log query/response pairs and adding a feedback field is cheap"
+  ],
+  "tradeoffs": [
+    "Expensive at query time: the relevance check calls the LLM once per (retrieved doc x stored feedback entry), so cost and latency grow linearly with feedback history - O(docs*feedback) GPT-4o calls per query becomes untenable without pruning, caching, or a cheaper classifier",
+    "Needs real user feedback volume; useless for one-off scripts, cold-start systems, or low-traffic apps where feedback is sparse",
+    "Feedback quality risk: noisy, biased, or adversarial ratings directly reshape ranking and get baked into the index during fine-tuning",
+    "Index 'fine-tuning' here is naive - it concatenates highly-rated query+answer strings into the corpus and rebuilds the whole vector store, which can inject model-generated (possibly hallucinated) text into the retrieval corpus and requires periodic full re-indexing",
+    "The notebook's score adjustment assumes docs carry a 'relevance_score' in metadata and mutates retriever.search_kwargs in a way that is illustrative rather than production-ready; real deployment needs a custom retriever/re-ranker layer",
+    "Adds state management (feedback JSON store, re-index schedule) and thus operational complexity compared to stateless RAG"
+  ],
+  "how_it_works": "Setup: a PDF is read to a string (read_pdf_to_string from repo helper_functions), embedded into a FAISS-style vector store (encode_from_string), and wrapped in a LangChain RetrievalQA chain with ChatOpenAI gpt-4o. Loop step 1 - collect: after each answer, get_user_feedback() packages {query, response, relevance 1-5, quality 1-5, comments} and store_feedback() appends it as a JSON line to data/feedback_data.json. Loop step 2 - re-rank (post-retrieval): on a new query, adjust_relevance_scores() iterates over every retrieved doc and every stored feedback entry, asking gpt-4o (via a PromptTemplate piped to llm.with_structured_output(Response) with a Yes/No Pydantic schema) whether that past feedback is relevant to the current query+doc; for docs with relevant feedback it multiplies doc.metadata['relevance_score'] by avg_relevance/3 (3 = neutral on the 1-5 scale) and re-sorts docs by adjusted score, then stuffs the adjusted docs back into retriever.search_kwargs. Loop step 3 - periodic index update (indexing stage): fine_tune_index() filters feedback with relevance>=4 and quality>=4, concatenates their query+response text onto the original corpus, and rebuilds the vector store with encode_from_string, swapping in a new retriever. The technique therefore spans post-retrieval (dominant: feedback-driven re-ranking) plus indexing (periodic corpus enrichment) and orchestration (the ongoing collect-adjust-refresh cycle).",
+  "key_dependencies": [
+    "langchain (RetrievalQA, PromptTemplate, LLMChain-style pipe)",
+    "langchain-openai (ChatOpenAI gpt-4o)",
+    "OpenAI API (gpt-4o for generation and feedback-relevance judging)",
+    "pydantic (BaseModel/Field for structured Yes/No output)",
+    "python-dotenv",
+    "repo helper_functions.py (read_pdf_to_string, encode_from_string - FAISS + OpenAI embeddings under the hood)",
+    "json / local JSONL file as the feedback store"
+  ],
+  "key_code_signals": [
+    "store_feedback(feedback) appending {query, response, relevance, quality, comments} as JSON lines to data/feedback_data.json",
+    "adjust_relevance_scores(query, docs, feedback_data) - nested loop calling the LLM per (doc, feedback) pair",
+    "relevance_chain = relevance_prompt | llm.with_structured_output(Response) with a Yes/No Pydantic Response model",
+    "doc.metadata['relevance_score'] *= (avg_relevance / 3) followed by sorted(docs, key=relevance_score, reverse=True)",
+    "fine_tune_index(feedback_data, texts) filtering relevance >= 4 and quality >= 4 and rebuilding via encode_from_string(all_texts)",
+    "retriever.search_kwargs['docs'] = adjusted_docs to push re-ranked docs back into the retriever",
+    "qa_chain = RetrievalQA.from_chain_type(llm, retriever=retriever) with ChatOpenAI(model_name='gpt-4o')"
+  ],
+  "related_techniques": [
+    "reranking: refines - both re-order retrieved docs post-retrieval, but this uses accumulated user feedback instead of a cross-encoder/LLM relevance model per query",
+    "adaptive_retrieval: sibling - same 'Iterative Techniques' repo category; adapts retrieval per query type at query time rather than learning across sessions from feedback",
+    "retrieval_with_feedback_loop vs self_rag: alternative - Self-RAG uses the model's own reflection tokens as the feedback signal within one query, this uses human ratings across queries",
+    "simple_rag: prerequisite - the base vectorstore + RetrievalQA pipeline this technique wraps",
+    "relevant_segment_extraction / contextual_compression: composes-with - feedback re-ranking can precede context filtering before generation",
+    "choose_chunk_size / simple_rag indexing: composes-with - fine_tune_index rebuilds the same encode_from_string index with feedback-derived documents"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "feedback loop",
+    "user feedback RAG",
+    "thumbs up down ratings",
+    "relevance score adjustment",
+    "re-ranking with feedback",
+    "continuous improvement retrieval",
+    "online learning RAG",
+    "self-improving RAG",
+    "index fine-tuning",
+    "personalization",
+    "human-in-the-loop retrieval",
+    "answer quality ratings",
+    "iterative RAG",
+    "adaptive ranking",
+    "vector store update"
+  ],
+  "summary": "Retrieval with Feedback Loop makes a RAG system learn from its users instead of staying static. Every answer is rated (relevance and quality, 1-5) and appended to a JSONL feedback store. On later queries, an LLM judge (gpt-4o with structured Yes/No output) checks each stored feedback entry against each retrieved document and the current query; documents backed by positively-rated past interactions get their relevance_score metadata multiplied up (avg_relevance/3), negatively-rated ones get demoted, and the doc list is re-sorted before generation. Periodically, feedback with relevance>=4 and quality>=4 is converted into new corpus text (query + answer concatenated) and the vector store is rebuilt, so proven-good answers become directly retrievable. It addresses the failure where a RAG system repeats bad answers and never adapts to user preference. Costs: O(docs x feedback entries) LLM calls per query, dependence on sufficient honest feedback volume, risk of injecting model-generated text into the index, and full periodic re-indexing. Best for long-lived, recurring-question applications; wrong for cold-start or low-traffic systems.",
+  "notes_for_chunking": "Well-structured for chunking: cell 1 is a single large, self-contained markdown overview (Overview / Motivation / Key Components / Method Details / Benefits / Conclusion with ### subsections) that alone could serve as the concept chunk. After that, the notebook alternates one short '### ...' markdown header cell with one code cell per function (get_user_feedback, store_feedback, load_feedback_data, adjust_relevance_scores, fine_tune_index, demo, periodic fine-tune) - ideal header+code pairing; keep each header cell glued to its following code cell. Markdown/code ratio roughly 50/50 by cell count but code dominates by tokens in the second half. Junk to strip: cell 0 (book advertisement), cell 2 (SVG image embed), cell 4 (pip install), cell 5 (git clone + sys.path Colab boilerplate), cell 8 (wget data downloads), and the final tracking-pixel markdown cell. No cell outputs present, so no giant output stripping needed. The wildcard imports 'from helper_functions import *' hide key functions (read_pdf_to_string, encode_from_string, PromptTemplate, BaseModel come from there implicitly) - note this when attributing dependencies. adjust_relevance_scores and fine_tune_index are the two load-bearing code cells; each is self-contained enough to embed as its own chunk with its header."
+}

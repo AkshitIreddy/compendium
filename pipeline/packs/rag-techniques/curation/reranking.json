@@ -1,0 +1,82 @@
+{
+  "slug": "reranking",
+  "title": "Reranking (LLM-based and Cross-Encoder)",
+  "one_liner": "Re-score an oversized candidate set from vector search with a stronger relevance model (GPT-4o judge or a cross-encoder) and keep only the top few documents before generation.",
+  "stage": "post-retrieval",
+  "problem_solved": "Embedding-based (bi-encoder) similarity search often ranks superficially similar chunks above chunks that actually answer the question, because query and document are embedded independently and compared with a coarse cosine score. Reranking adds a second-pass scorer that examines each query-document pair jointly, so the final top-k passed to the LLM is precision-optimized rather than recall-optimized, cutting noise from the context window.",
+  "failure_modes": [
+    "My retriever returns chunks that mention the query's keywords but don't actually answer the question",
+    "Irrelevant or marginally relevant chunks pollute the context window and dilute the answer",
+    "The correct passage is retrieved but sits at rank 8-20, below the k I pass to the LLM",
+    "Answers degrade because the generator is fed near-duplicate or vague chunks instead of the one that contains the fact",
+    "Embedding similarity can't distinguish nuanced intent (e.g. 'what is the capital' vs sentences praising the capital without naming it)",
+    "I want to retrieve broadly (high recall) but only send a few high-precision chunks to the LLM"
+  ],
+  "when_to_use": [
+    "Recall looks fine at k=20-30 but the top 3-5 results are poor - the answer is in the candidate set, just badly ordered",
+    "Your corpus has many near-duplicate or topically overlapping chunks and the generator needs the few that actually contain the answer",
+    "Queries require nuanced intent matching that cosine similarity misses (paraphrases, implicit answers, negations)",
+    "You want to shrink the context window (cost/token limits) without losing the relevant chunk",
+    "You already have a working vector-store RAG pipeline and want a drop-in quality upgrade without re-indexing",
+    "Choose the cross-encoder variant when you need low cost per query and can host a small model; choose the LLM-judge variant when you need instruction-aware relevance judgments and can afford per-document LLM calls"
+  ],
+  "tradeoffs": [
+    "LLM-based reranking makes one LLM call per candidate document (notebook: up to 30 GPT-4o calls per query) - expensive and slow; scores are also LLM-parse-dependent (notebook defaults to 0 on parse failure)",
+    "Cross-encoder reranking is far cheaper per pair but requires hosting/loading a sentence-transformers model and still adds a forward pass per candidate; it cannot follow instructions or use world knowledge like an LLM judge",
+    "Adds latency on every query (serial LLM scoring in the notebook is not batched or parallelized) - avoid for latency-critical interactive search",
+    "Cannot fix recall: if the answer chunk is not in the initial k candidates, no reranker will surface it - fix retrieval (fusion, query transformation) first",
+    "Overkill for small or clean corpora where top-k similarity search is already precise",
+    "Tuning two knobs (initial k and rerank_top_k) adds evaluation burden; too small an initial k silently caps quality"
+  ],
+  "how_it_works": "A standard pipeline (PDF -> encode_pdf helper -> FAISS vector store) performs initial retrieval with an intentionally large k (10-30 candidates via vectorstore.similarity_search). Two reranking implementations are then shown, each wrapped as a custom LangChain BaseRetriever so it slots directly into RetrievalQA.from_chain_type(chain_type='stuff'). Method 1 (LLM judge): a PromptTemplate asks GPT-4o (temperature=0) to rate each document's relevance to the query on a 1-10 scale, with llm.with_structured_output(RatingScore) - a Pydantic model with a relevance_score float - enforcing parseable scores; documents are scored one-by-one in a loop, sorted descending, and the top_n (2-3) are returned. Method 2 (cross-encoder): sentence_transformers CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2') jointly encodes [query, doc] pairs and predicts relevance scores in a single predict call over all pairs; a CrossEncoderRetriever retrieves k=10 candidates and returns rerank_top_k=5. A toy 'capital of France' comparison demonstrates the payoff: baseline similarity search returns keyword-similar filler sentences, while the reranked retriever surfaces the passages that actually name Paris. The technique operates purely post-retrieval; retrieval and generation stages are unchanged.",
+  "key_dependencies": [
+    "langchain (Document, PromptTemplate, RetrievalQA, BaseRetriever)",
+    "langchain-openai (ChatOpenAI gpt-4o, OpenAIEmbeddings)",
+    "sentence-transformers (CrossEncoder)",
+    "FAISS (vector store, via repo helper_functions.encode_pdf)",
+    "pydantic (BaseModel/Field for structured relevance scores)",
+    "python-dotenv (OpenAI API key loading)"
+  ],
+  "key_code_signals": [
+    "from sentence_transformers import CrossEncoder; CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')",
+    "llm.with_structured_output(RatingScore) where RatingScore is a Pydantic model with relevance_score: float",
+    "PromptTemplate asking GPT-4o to 'rate the relevance of the following document to the query' on a 1-10 scale",
+    "vectorstore.similarity_search(query, k=15/30) - over-retrieve then rerank_documents(query, docs, top_n=3)",
+    "class CustomRetriever(BaseRetriever, BaseModel) wrapping rerank inside get_relevant_documents",
+    "cross_encoder.predict([[query, doc.page_content], ...]) then sorted(zip(docs, scores), reverse=True)[:rerank_top_k]",
+    "RetrievalQA.from_chain_type(llm, chain_type='stuff', retriever=custom_retriever)"
+  ],
+  "related_techniques": [
+    "reranking_with_llamaindex: alternative implementation of the same technique using LlamaIndex",
+    "fusion_retrieval: composes - hybrid BM25+vector retrieval produces the candidate set that reranking then reorders",
+    "contextual_compression: alternative post-retrieval cleanup - compresses/filters chunk content instead of reordering whole chunks",
+    "multi_faceted_filtering: alternative/complementary post-retrieval filtering by metadata and scores",
+    "simple_rag: prerequisite - baseline vector-store pipeline that reranking bolts onto",
+    "query_transformations: complementary - fixes recall at the query side while reranking fixes precision after retrieval",
+    "hierarchical_indices: complementary - improves candidate generation before the rerank stage",
+    "graphrag_with_milvus_vectordb: composes - uses reranking after multi-way graph+vector retrieval",
+    "retrieval_with_feedback_loop: complementary - adjusts relevance over time while reranking scores per-query"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "reranking",
+    "rerank retrieved documents",
+    "cross-encoder",
+    "ms-marco-MiniLM",
+    "LLM as reranker",
+    "relevance scoring",
+    "second-stage ranking",
+    "two-stage retrieval",
+    "top-k precision",
+    "irrelevant chunks in context",
+    "bi-encoder vs cross-encoder",
+    "retrieve then rerank",
+    "sentence-transformers",
+    "search result ordering",
+    "context window noise",
+    "RAG answer quality"
+  ],
+  "summary": "Reranking adds a second-pass relevance scoring stage after initial vector retrieval: fetch a deliberately oversized candidate set (k=10-30) with cheap embedding similarity, then re-score each query-document pair with a stronger model and keep only the top few for generation. The notebook implements two rerankers as drop-in LangChain BaseRetriever subclasses feeding a RetrievalQA stuff chain: (1) an LLM judge where GPT-4o rates each document's relevance 1-10 via a prompt with Pydantic structured output, and (2) a local cross-encoder (cross-encoder/ms-marco-MiniLM-L-6-v2 from sentence-transformers) that jointly encodes query+document pairs and scores them in one predict call. It fixes the classic bi-encoder failure where superficially similar chunks ('The capital of France is great') outrank chunks that actually answer the question ('...Paris...'), reducing context-window noise and improving grounding. Costs: per-query latency, one LLM call per candidate for the LLM variant, or model-hosting for the cross-encoder. Use when recall is fine but top-k precision is poor; it cannot recover documents the retriever never fetched.",
+  "notes_for_chunking": "Structure is clean and section-driven: an H1 overview cell (Overview/Motivation/Key Components/Method Details/Benefits/Conclusion as H2s within one markdown cell - self-contained and highly embeddable on its own), then two clearly separated method sections ('## Method 1: LLM based function...' and '## Method 2: Cross Encoder models') each with '###' subsection headers preceding every code cell. Markdown/code ratio is roughly 50/50 with short, purposeful code cells. Junk to strip: the promotional book-ad cell at the very top (cell-0), pip install cell, git-clone + sys.path Colab-compat cell, duplicated wget download lines, three HTML <img> cells referencing local SVGs, and a tracking-pixel markdown image at the end. The wildcard 'from helper_functions import *' hides encode_pdf/FAISS/OpenAIEmbeddings definitions - chunker should note external helper dependence. One valuable output: the 'capital of France' baseline-vs-reranked comparison output demonstrates the technique's payoff and is worth keeping with its code cell; other outputs are absent or trivial. Method 1 and Method 2 sections are independently self-contained and could be separate chunks; keep the RatingScore class with rerank_documents (same cell) and CrossEncoder instantiation with CrossEncoderRetriever (same cell).",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/reranking.json"
+}

@@ -1,0 +1,81 @@
+{
+  "slug": "reliable_rag",
+  "title": "Reliable RAG (Relevance Grading + Hallucination Check + Source Highlighting)",
+  "one_liner": "Adds three LLM-based validation gates to a basic RAG pipeline: grade each retrieved document for relevance before generation, verify the generated answer is grounded in the kept documents, and extract the verbatim source segments that support the answer.",
+  "stage": "post-retrieval",
+  "problem_solved": "Basic RAG blindly trusts top-k similarity retrieval and unconstrained generation: irrelevant chunks slip into the context window, the LLM can assert facts not present in the retrieved documents, and users have no way to verify which source text an answer actually came from. Reliable RAG inserts explicit quality gates so only relevant documents reach the generator, ungrounded answers are flagged, and every answer is traceable to exact document segments.",
+  "failure_modes": [
+    "Irrelevant or off-topic chunks returned by top-k vector search pollute the context window and mislead the answer",
+    "The model's answers contain claims that are not supported by the retrieved documents (hallucination / ungrounded generation)",
+    "Users or auditors cannot verify which source passage supports the answer, so they don't trust the system's output",
+    "Erroneous retrievals pass through silently because there is no quality check between the retriever and the generator",
+    "Answers cite whole documents instead of pointing to the exact sentence-level evidence"
+  ],
+  "when_to_use": [
+    "You need trustworthy, auditable answers with source attribution (compliance, legal, medical, customer-facing Q&A)",
+    "Your retriever's top-k results are inconsistent and often include off-topic chunks that degrade answer quality",
+    "You want a lightweight reliability upgrade over basic RAG without adopting a full agentic loop like Self-RAG or CRAG",
+    "You can afford a few extra fast-LLM calls per query (the notebook uses a small llama-3.1-8b model on Groq for grading)",
+    "You need a machine-checkable groundedness signal per answer, e.g. to gate what gets shown to users or to log for evaluation"
+  ],
+  "tradeoffs": [
+    "Adds roughly k+2 extra LLM calls per query (one relevance grade per retrieved document, one hallucination check, one segment-extraction call) — real latency and cost overhead",
+    "Binary yes/no grading by a small LLM is noisy: the deliberately lenient prompt can pass borderline documents, while stricter prompting risks dropping useful context",
+    "The pipeline is linear detection-only: when the hallucination grader says 'no' there is no built-in retry, re-retrieval, or correction loop (unlike Self-RAG/CRAG)",
+    "Verbatim segment extraction relies on the LLM returning exact word-for-word snippets; it can paraphrase or hallucinate segments, and the notebook needs a larger model (mixtral-8x7b) for this step",
+    "Overkill for low-stakes or latency-sensitive applications; if your retrieval precision is already high, per-document grading adds cost with little benefit",
+    "If all retrieved documents are graded irrelevant, docs_to_use is empty and the pipeline has no fallback behavior"
+  ],
+  "how_it_works": "Indexing is standard: five web articles are loaded with WebBaseLoader, split with RecursiveCharacterTextSplitter.from_tiktoken_encoder (chunk_size=500, overlap=0), embedded with Cohere embed-english-v3.0, and stored in Chroma; a similarity retriever returns top k=4 chunks. The reliability layer then runs three LLM gates. (1) Relevance grading (post-retrieval): a ChatGroq llama-3.1-8b-instant grader with Pydantic structured output (GradeDocuments.binary_score) scores each retrieved document 'yes'/'no' against the question; only 'yes' documents are kept in docs_to_use. (2) Grounded generation + hallucination check (generation/evaluation): an answer is generated from the filtered documents (formatted as <doc_i> blocks with title/source metadata), then a second structured grader (GradeHallucinations) checks whether the generation is supported by those documents, returning a binary groundedness verdict. (3) Source highlighting (attribution): a larger model (mixtral-8x7b-32768) with a PydanticOutputParser (HighlightDocuments) extracts the exact verbatim segments, plus doc id/title/source, that were used to answer — enabling citation display and auditing. The technique primarily operates post-retrieval but spans generation-time validation and per-answer evaluation.",
+  "key_dependencies": [
+    "langchain / langchain-community (prompts, chains, WebBaseLoader, text splitter, output parsers)",
+    "langchain-groq ChatGroq (llama-3.1-8b-instant for grading and generation; mixtral-8x7b-32768 for segment extraction) — requires GROQ_API_KEY",
+    "langchain-cohere CohereEmbeddings embed-english-v3.0 — requires COHERE_API_KEY",
+    "Chroma vector store (langchain_community.vectorstores)",
+    "pydantic BaseModel/Field for structured grader outputs",
+    "python-dotenv for API key loading"
+  ],
+  "key_code_signals": [
+    "class GradeDocuments(BaseModel): binary_score — Pydantic schema forcing a 'yes'/'no' relevance verdict per retrieved document",
+    "llm.with_structured_output(GradeDocuments) piped after a grader ChatPromptTemplate — the retrieval_grader chain",
+    "Filter loop building docs_to_use: append doc only if res.binary_score == 'yes'",
+    "class GradeHallucinations(BaseModel) + hallucination_grader.invoke({'documents': format_docs(docs_to_use), 'generation': generation}) — post-generation groundedness check",
+    "class HighlightDocuments(BaseModel) with id/title/source/segment lists + PydanticOutputParser — verbatim supporting-segment extraction",
+    "format_docs wrapping each doc in <doc{i}> tags with Title/Source metadata so the LLM can cite by id",
+    "Chroma.from_documents(doc_splits, CohereEmbeddings('embed-english-v3.0')) with retriever search_kwargs={'k': 4}",
+    "ChatGroq(model='llama-3.1-8b-instant', temperature=0) for graders vs ChatGroq(model='mixtral-8x7b-32768') for extraction"
+  ],
+  "related_techniques": [
+    "simple_rag: refines — same pipeline with validation gates layered on top",
+    "self_rag: extension/alternative — full self-reflective loop that also retries retrieval and regenerates; Reliable RAG is the lighter, linear, detect-only version",
+    "crag: alternative — Corrective RAG takes action (e.g. web-search fallback) when documents are graded irrelevant; Reliable RAG only filters them out",
+    "reranking: alternative — cross-encoder or LLM reranking also removes irrelevant chunks post-retrieval, without binary per-doc grader calls",
+    "relevant_segment_extraction: related — both surface the exact passage-level evidence supporting an answer",
+    "explainable_retrieval: related — both aim at transparency/attribution of which sources drive the answer",
+    "retrieval_with_feedback_loop: composes-with — grading verdicts can serve as the feedback signal"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "hallucination detection",
+    "groundedness check",
+    "document relevance grading",
+    "LLM grader",
+    "filter irrelevant chunks",
+    "answer attribution",
+    "citations",
+    "source highlighting",
+    "verbatim segment extraction",
+    "trustworthy RAG",
+    "reliable RAG",
+    "RAG validation",
+    "binary relevance score",
+    "structured output pydantic",
+    "self-grading RAG",
+    "groq llama",
+    "cohere embeddings",
+    "chroma"
+  ],
+  "summary": "Reliable RAG hardens a basic retrieve-then-generate pipeline against two core failures: irrelevant retrieved chunks polluting the context window, and ungrounded (hallucinated) answers that users cannot verify. After standard indexing (web pages split into 500-token chunks, Cohere embed-english-v3.0 embeddings, Chroma, top-4 similarity retrieval), it inserts three LLM validation gates built with Pydantic structured outputs. First, a fast grader (Groq llama-3.1-8b-instant) assigns each retrieved document a binary yes/no relevance score against the question, and only 'yes' documents are passed to generation. Second, after answering from the filtered documents, a hallucination grader checks whether the generation is supported by those documents, yielding a machine-checkable groundedness verdict. Third, a larger model (mixtral-8x7b) extracts the verbatim document segments, with doc id, title, and source URL, that support the answer, enabling citation display and auditing. Costs are roughly k+2 extra LLM calls per query, and the pipeline only detects problems — it has no retry or corrective loop, which Self-RAG and CRAG add. Best for trust-sensitive Q&A needing attribution.",
+  "notes_for_chunking": "Structure is clean and stage-per-section: short one-line markdown headers ('### Create Vectorstore', '### Check document relevancy', '### Check for Hallucinations', '### Highlight used docs') each introduce exactly one self-contained code cell, so header+code pairs make natural chunks. Markdown/code ratio is very low — headers carry almost no prose, so the code (especially the Pydantic models and grader system prompts embedded as strings) carries the semantics; keep prompt strings intact when chunking. Junk to strip: the first cell is a book-promotion ad, the last cell is a tracking-pixel image, one cell is a broken attachment-image reference, and there's a pip-install cell plus a dotenv/API-key boilerplate cell. Cells 12 and 16 have very large printed outputs (full retrieved article text repeated per document) that dwarf the code and should be truncated or dropped. The visual-representation cell references a local SVG. No function definitions span sections; each chain (grader, generator, hallucination checker, highlighter) is fully defined within its own cell.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/reliable_rag.json"
+}

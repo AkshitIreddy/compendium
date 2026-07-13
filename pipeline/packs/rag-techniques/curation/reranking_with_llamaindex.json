@@ -1,0 +1,82 @@
+{
+  "slug": "reranking_with_llamaindex",
+  "title": "Reranking (LlamaIndex): LLM and Cross-Encoder Node Postprocessors",
+  "one_liner": "Over-fetch candidates from a FAISS vector index, then rescore query-chunk pairs with an LLM reranker or a cross-encoder node postprocessor so only the truly relevant top-N reach the generator.",
+  "stage": "post-retrieval",
+  "problem_solved": "Bi-encoder embedding similarity is a coarse relevance signal: the initial vector search often ranks superficially similar chunks above the ones that actually answer the question, so irrelevant or vague text fills the limited context window and degrades generation quality.",
+  "failure_modes": [
+    "My retriever returns chunks that mention the right words but don't actually answer the question",
+    "Irrelevant or near-duplicate chunks pollute the context window and crowd out the answer-bearing passage",
+    "The correct passage is retrieved but ranked too low (position 6-10) so it gets cut before generation",
+    "Embedding cosine similarity treats vague lookalike sentences as more relevant than passages containing the actual answer",
+    "Answer quality drops when I increase top_k because extra noise confuses the LLM",
+    "Nuanced relevance (does this chunk really address the query intent?) is missed by plain vector search"
+  ],
+  "when_to_use": [
+    "You already have a working vector-search RAG pipeline (especially LlamaIndex-based) and precision of the final top-N chunks is the bottleneck, not recall",
+    "Manual inspection shows the right chunk is usually somewhere in the top 10-20 retrieved candidates but not in the top 3-5 passed to the LLM",
+    "Your corpus contains many chunks with overlapping vocabulary where only a few actually contain answers",
+    "You can afford one extra scoring pass per query: an LLM call (LLMRerank) or a local cross-encoder inference (SentenceTransformerRerank)",
+    "You want a no-API-cost option: the cross-encoder variant (ms-marco-MiniLM-L-6-v2) runs locally and needs no extra LLM calls",
+    "You want to shrink the context window (e.g. 10 candidates down to 5) without losing the relevant material"
+  ],
+  "tradeoffs": [
+    "Adds per-query latency: LLMRerank makes an extra LLM call over all candidates; the cross-encoder runs a forward pass per query-chunk pair (no ANN shortcut)",
+    "LLMRerank adds token cost proportional to candidates x chunk length, and its parsed relevance scores can be brittle/nondeterministic",
+    "Cross-encoder reranking requires downloading and hosting a sentence-transformers model (CPU/GPU inference footprint)",
+    "Only reorders and filters what the first stage retrieved: if the answer chunk is not in the initial top_k, reranking cannot recover it (fix recall with fusion retrieval or query transformations instead)",
+    "Requires tuning two knobs (similarity_top_k for the candidate pool, top_n for the kept set); too small a pool defeats the purpose, too large inflates cost",
+    "Skip it for latency-critical applications where the baseline retriever is already precise, or for tiny corpora where the LLM can just take everything"
+  ],
+  "how_it_works": "Ingestion: SimpleDirectoryReader loads a PDF, an IngestionPipeline with SentenceSplitter chunks it into nodes, and embeddings (OpenAI text-embedding-3-small truncated to 512 dims) are stored in a FaissVectorStore (IndexFlatL2). Querying is two-stage. Stage 1 (retrieval): index.as_query_engine(similarity_top_k=10) over-fetches 10 candidate nodes by vector similarity. Stage 2 (post-retrieval): a node_postprocessor rescores each query-chunk pair and keeps top_n=5. Two interchangeable rerankers are shown: (1) LLMRerank, which prompts gpt-3.5-turbo to rate the relevance of each candidate chunk to the query and re-sorts by the parsed scores; (2) SentenceTransformerRerank, which feeds query-document pairs through a local SBERT cross-encoder (cross-encoder/ms-marco-MiniLM-L-6-v2) for joint relevance scoring. A standalone demo calls reranker.postprocess_nodes(baseline_docs, QueryBundle(query)) on a toy 'capital of France' corpus, showing baseline retrieval returning vague lookalike sentences while the reranked list surfaces the passages that actually identify Paris. The technique touches retrieval (candidate over-fetching) but its core operation is post-retrieval reordering/filtering before generation.",
+  "key_dependencies": [
+    "llama-index (core: VectorStoreIndex, IngestionPipeline, SentenceSplitter, QueryBundle, Settings)",
+    "llama_index.core.postprocessor (LLMRerank, SentenceTransformerRerank)",
+    "llama_index.vector_stores.faiss (FaissVectorStore) + faiss-cpu",
+    "llama_index.llms.openai / llama_index.embeddings.openai (gpt-3.5-turbo, text-embedding-3-small)",
+    "sentence-transformers cross-encoder model: cross-encoder/ms-marco-MiniLM-L-6-v2 (pulled by SentenceTransformerRerank)",
+    "python-dotenv (OPENAI_API_KEY loading)"
+  ],
+  "key_code_signals": [
+    "from llama_index.core.postprocessor import SentenceTransformerRerank, LLMRerank",
+    "index.as_query_engine(similarity_top_k=10, node_postprocessors=[LLMRerank(top_n=5)])",
+    "SentenceTransformerRerank(model='cross-encoder/ms-marco-MiniLM-L-6-v2', top_n=5)",
+    "reranker.postprocess_nodes(baseline_docs, QueryBundle(query))",
+    "IngestionPipeline(transformations=[SentenceSplitter()], vector_store=vector_store)",
+    "FaissVectorStore(faiss_index=faiss.IndexFlatL2(EMBED_DIMENSION))",
+    "Settings.embed_model = OpenAIEmbedding(model='text-embedding-3-small', dimensions=512)"
+  ],
+  "related_techniques": [
+    "reranking: alternative implementation — same technique built with LangChain instead of LlamaIndex",
+    "fusion_retrieval: composes — rerank the merged candidate list from hybrid keyword+vector retrieval",
+    "contextual_compression: alternative post-retrieval cleanup — compresses chunk content instead of reordering whole chunks",
+    "multi_faceted_filtering: related — metadata/similarity filtering as a cheaper post-retrieval precision step",
+    "hierarchical_indices: composes — apply reranking to second-stage chunk candidates",
+    "relevant_segment_extraction: composes — refine what part of the reranked chunks is passed to generation",
+    "hyde_hypothetical_document_embedding: complementary — fixes recall via query transformation while reranking fixes precision",
+    "simple_rag: prerequisite — reranking assumes a working baseline retriever to over-fetch candidates"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "reranking",
+    "rerank",
+    "cross-encoder",
+    "LLM reranker",
+    "LlamaIndex",
+    "node postprocessor",
+    "LLMRerank",
+    "SentenceTransformerRerank",
+    "ms-marco-MiniLM",
+    "two-stage retrieval",
+    "precision at k",
+    "irrelevant chunks in context",
+    "retrieval relevance",
+    "top-k reordering",
+    "FAISS",
+    "SBERT",
+    "post-retrieval filtering",
+    "context window noise"
+  ],
+  "summary": "Two-stage retrieval with reranking in LlamaIndex: an initial FAISS vector search over-fetches candidates (similarity_top_k=10), then a node postprocessor rescores each query-chunk pair with a stronger relevance model and keeps only top_n=5 before generation. The notebook implements both reranker styles LlamaIndex supports natively: LLMRerank, which prompts an LLM (gpt-3.5-turbo) to score candidate chunks for relevance, and SentenceTransformerRerank, which runs a local SBERT cross-encoder (cross-encoder/ms-marco-MiniLM-L-6-v2) on query-document pairs. This targets the core weakness of bi-encoder embedding search: cosine similarity ranks superficially similar chunks above answer-bearing ones, letting irrelevant text pollute the context window. A toy 'capital of France' demo makes this concrete — baseline retrieval returns vague lookalike sentences while the reranked list surfaces passages that actually name Paris. Ingestion uses SimpleDirectoryReader on a PDF, SentenceSplitter chunking, and an IngestionPipeline into a FaissVectorStore with 512-dim OpenAI text-embedding-3-small vectors. Cost is per-query latency and tokens: one LLM scoring call or cross-encoder inference over 10 candidates, traded for markedly better precision of the final context.",
+  "notes_for_chunking": "26 cells, high markdown-to-code ratio, short code cells. Junk to strip: cell-0 is a promotional book advertisement; cells 2, 3, 16, 22 are image-only markdown (local SVG refs); cell-5 is pip install; cell-8 is a wget data download; the final cell (25) is a tracking-pixel markdown. Cell-1 is a long, fully self-contained conceptual essay (Overview/Motivation/Key Components/Method Details/Benefits/Conclusion under one H1) — excellent standalone embedding material, could be split at its H2s. Cell-6 is boilerplate imports/env/Settings but contains meaningful config (embedding model, dims, LLM) worth keeping with setup context. Clear header hierarchy afterward: 'Read docs', 'Create a vector store', 'Ingestion Pipeline', 'Querying' with H3 subsections 'Method 1: LLM based reranking' and 'Method 2: Cross Encoder models' — each method section is self-contained (header + code) and should be chunked as a unit. Cell-20's printed output (baseline vs reranked comparison) is short and pedagogically valuable — keep it, unlike typical outputs. Headers alone are terse; prepend the notebook title for context."
+}

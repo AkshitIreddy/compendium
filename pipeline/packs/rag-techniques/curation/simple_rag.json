@@ -1,0 +1,84 @@
+{
+  "slug": "simple_rag",
+  "title": "Simple RAG (Baseline Retrieval-Augmented Generation over PDFs)",
+  "one_liner": "The canonical baseline RAG pipeline: load a PDF, chunk it with overlap, embed with OpenAI, index in FAISS, and retrieve top-k chunks per query.",
+  "stage": "retrieval",
+  "problem_solved": "An LLM cannot answer questions about private or document-specific content it was never trained on, and stuffing whole documents into the prompt is impossible or wasteful. Simple RAG grounds answers in a user's own documents by encoding them into a searchable vector store and fetching only the few chunks most semantically similar to each question.",
+  "failure_modes": [
+    "The model hallucinates or says 'I don't know' when asked about content in my private PDFs or internal documents",
+    "My documents are too long to fit in the model's context window",
+    "Answers are not grounded in any source text, so I can't trace where a claim came from",
+    "Keyword search misses relevant passages when the question uses different wording than the document (semantic similarity helps versus exact-match search)",
+    "I have no retrieval pipeline at all yet and need a working question-answering baseline over documents"
+  ],
+  "when_to_use": [
+    "You are starting a new RAG project and need a working end-to-end baseline before adding sophistication",
+    "Your corpus is a modest set of text-centric PDFs or documents where facts are mostly self-contained within ~1000-character passages",
+    "Questions are single-hop and factoid-like ('what is the main cause of X?') rather than multi-hop or aggregate",
+    "You want a cheap, low-latency pipeline: one embedding call per query, no extra LLM calls in the retrieval path",
+    "You need a control/reference system to measure whether an advanced technique (reranking, query rewriting, contextual chunks) actually improves results"
+  ],
+  "tradeoffs": [
+    "Fixed-size chunking (1000 chars, 200 overlap) cuts across sentences and sections, so retrieved chunks can lack surrounding context — no parent-document or context-enrichment mechanism",
+    "Pure dense top-k retrieval: no keyword/BM25 fallback, so exact terms, IDs, and rare tokens can be missed (rank_bm25 is installed but never used)",
+    "k=2 is aggressive; broad or multi-aspect questions will not get enough evidence, and there is no reranking or relevance filtering to remove off-topic chunks",
+    "No query transformation: vocabulary mismatch between question and corpus directly hurts recall",
+    "No answer-generation grounding checks; irrelevant retrieved chunks flow straight into the prompt",
+    "Do not stop here for production systems with long reports, tables, figures, multi-hop questions, or large heterogeneous corpora — this is explicitly the foundation the other 40+ techniques in the repo improve on",
+    "Embedding the corpus costs one OpenAI API call pass at index time and requires re-indexing when documents change"
+  ],
+  "how_it_works": "A single `encode_pdf(path, chunk_size=1000, chunk_overlap=200)` function does the whole indexing stage: PyPDFLoader extracts text from the PDF; RecursiveCharacterTextSplitter splits it into 1000-character chunks with 200-character overlap; a small cleaning helper `replace_t_with_space` fixes PDF tab artifacts; OpenAI embeddings (via `get_langchain_embedding_provider(EmbeddingProvider.OPENAI)`, with Amazon Bedrock as a commented-out alternative) vectorize each chunk; and `FAISS.from_documents` builds an in-memory similarity index. Query time is `vectorstore.as_retriever(search_kwargs={'k': 2})`: the question is embedded and the top-2 nearest chunks are returned as context (`retrieve_context_per_question`). The notebook closes with `evaluate_rag(retriever)`, an LLM-based evaluation that auto-generates quiz questions from the corpus and scores retrieved context on Relevance/Completeness/Conciseness — a rough retrieval-quality harness rather than answer-quality evaluation. Although filed under retrieval, the notebook equally covers indexing and chunking (they are inseparable in this baseline) and touches evaluation.",
+  "key_dependencies": [
+    "langchain / langchain-community (PyPDFLoader, RecursiveCharacterTextSplitter, FAISS vectorstore wrapper, retriever interface)",
+    "langchain_openai (OpenAI embeddings via helper)",
+    "faiss-cpu (vector similarity index)",
+    "pypdf / PyMuPDF (PDF text extraction)",
+    "deepeval (installed for the repo's evaluation module)",
+    "python-dotenv (API key loading)",
+    "repo helper_functions.py and evaluation/evalute_rag.py (cleaning, retrieval, display, LLM-judge evaluation)"
+  ],
+  "key_code_signals": [
+    "from langchain.document_loaders import PyPDFLoader",
+    "from langchain.text_splitter import RecursiveCharacterTextSplitter",
+    "RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200, length_function=len)",
+    "get_langchain_embedding_provider(EmbeddingProvider.OPENAI)",
+    "FAISS.from_documents(cleaned_texts, embeddings)",
+    "chunks_vector_store.as_retriever(search_kwargs={'k': 2})",
+    "retrieve_context_per_question(test_query, chunks_query_retriever)",
+    "evaluate_rag(chunks_query_retriever)"
+  ],
+  "related_techniques": [
+    "simple_rag_with_llamaindex: alternative (same baseline implemented with LlamaIndex instead of LangChain)",
+    "simple_csv_rag: sibling (same baseline pattern applied to CSV/tabular data)",
+    "choose_chunk_size: refines (tunes the chunk_size/chunk_overlap parameters this baseline hardcodes)",
+    "proposition_chunking: refines (replaces fixed-size chunking with atomic-fact chunks)",
+    "context_enrichment_window_around_chunk: refines (fixes 'retrieved chunk lacks surrounding context' left open here)",
+    "reranking: composes-with (adds a relevance-ordering stage after this notebook's top-k retrieval)",
+    "fusion_retrieval: refines (adds the BM25 keyword channel this notebook installs but never uses)",
+    "query_transformations: composes-with (fixes query/corpus vocabulary mismatch before this retriever runs)",
+    "HyDe_Hypothetical_Document_Embedding: composes-with (alternative query-side embedding strategy on top of the same FAISS index)",
+    "reliable_rag: refines (adds relevance checking and grounding on top of this baseline)",
+    "self_rag: refines (adaptive/agentic control flow around this basic retrieve-then-read loop)"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "basic rag",
+    "simple rag",
+    "vanilla rag baseline",
+    "pdf question answering",
+    "vector store",
+    "FAISS",
+    "OpenAI embeddings",
+    "semantic search",
+    "chunking with overlap",
+    "RecursiveCharacterTextSplitter",
+    "top-k retrieval",
+    "langchain retriever",
+    "document q&a starter",
+    "chat with pdf",
+    "getting started with retrieval augmented generation"
+  ],
+  "summary": "Simple RAG is the foundational retrieve-then-read pipeline every other technique in this repo builds on. Problem: an LLM cannot answer questions about your private documents, and long PDFs will not fit in a context window; you need grounded answers traced to source passages. Solution: a single encode_pdf function loads a PDF with PyPDFLoader, splits it into 1000-character chunks with 200-character overlap via RecursiveCharacterTextSplitter, cleans tab artifacts, embeds chunks with OpenAI embeddings, and stores them in a FAISS index; at query time the question is embedded and the top-2 most similar chunks are returned as context. An LLM-judge evaluate_rag harness scores retrieved context for relevance, completeness, and conciseness. Costs are minimal — one embedding pass at index time, one embedding call per query, no extra LLM calls in retrieval. Its known weaknesses (chunks lacking surrounding context, vocabulary mismatch, no reranking or keyword fallback, k=2 recall limits, no groundedness checks) are precisely the failure modes that advanced techniques like context enrichment, fusion retrieval, query transformation, and reranking address. Use it as a starting point and as the control baseline when evaluating any advanced retrieval method.",
+  "notes_for_chunking": "Structure: 21 cells, roughly half markdown half code, all short. Cell 0 is a promotional book advertisement (pure junk — strip). Cell 1 is a single long, well-structured overview markdown cell with ## headers (Overview, Key Components, Method Details, Key Features, Usage Example, Evaluation, Benefits, Conclusion) — it is the densest semantic content and could be split by its own H2 headers. After that, section markdown cells are minimal one-line H3 headers ('### Read Docs', '### Encode document', '### Create retriever', '### Test retriever', '### Evaluate results') with no explanatory prose, so code cells must be attached to their preceding header to be self-contained. Junk to strip: pip-install cell, git-clone cell with clone output, Colab API-key boilerplate, wget data-download cell with duplicate download logs, LangChain deprecation warnings in outputs, the tracking-pixel markdown image at the end, and one empty cell. The evaluate_rag output is a large JSON-ish blob of quiz questions and per-question scores — informative about what evaluation produces but very noisy; truncate or summarize rather than embed raw. The core signal is cell 1 (overview) plus the encode_pdf function cell and the retriever/test cells.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/simple_rag.json"
+}

@@ -1,0 +1,74 @@
+{
+  "slug": "hyde_hypothetical_document_embedding",
+  "title": "HyDE (Hypothetical Document Embedding)",
+  "one_liner": "At query time, an LLM writes a fake answer-document for the question and that hypothetical document (not the raw query) is embedded and used for vector search, closing the semantic gap between short questions and long answer passages.",
+  "stage": "query-transformation",
+  "problem_solved": "Dense retrieval embeds short, interrogative queries and long, declarative document chunks into the same vector space, but the two live in different distributions: 'What is the main cause of climate change?' looks nothing like the paragraph that answers it. HyDE fixes this query-document asymmetry by having an LLM generate a plausible answer passage first, so the search vector is document-shaped and lands near real answer chunks.",
+  "failure_modes": [
+    "My users type short questions but the corpus is long, detailed prose, so the top vector-search hits are only loosely related",
+    "The words in the query don't match the vocabulary used in the documents (query-document vocabulary/style mismatch)",
+    "Embedding similarity between a question and its actual answer passage is low, so the right chunk ranks below superficially similar ones",
+    "Complex or multi-faceted questions retrieve fragments about only one facet because the raw query embedding is too thin",
+    "Keyword-free conceptual questions ('why does X happen?') retrieve definitions of X instead of explanatory passages"
+  ],
+  "when_to_use": [
+    "Queries are short natural-language questions while corpus chunks are dense expository paragraphs (reports, papers, legal or academic text)",
+    "You control only the query side: the index is already built and re-indexing (e.g. with HyPE or chunk enrichment) is not an option",
+    "The LLM plausibly knows the domain well enough to draft a realistic-sounding answer, even if factually imperfect (surface form matters more than truth)",
+    "Zero-shot / cold-start retrieval where you have no relevance labels to fine-tune the embedder on question-passage pairs",
+    "You can tolerate one extra LLM call of latency per query in exchange for better recall"
+  ],
+  "tradeoffs": [
+    "Adds a full LLM generation call to every query: noticeably higher latency and per-query cost than plain vector search",
+    "If the LLM hallucinates a wrong-domain or off-topic hypothetical answer, retrieval is steered toward the wrong region of the vector space and results get worse than the raw query",
+    "Unhelpful for keyword/entity lookup queries (IDs, names, error codes) where the raw string already matches well; BM25 or plain dense search is cheaper and better there",
+    "Non-deterministic retrieval unless temperature is pinned to 0 (as in this notebook), which complicates evaluation and caching",
+    "Only fixes the query-side gap; if the relevant fact simply isn't in any chunk or chunking destroyed it, HyDE cannot help",
+    "The notebook's constraint that the hypothetical document match the chunk size (500 chars) is prompt-enforced only; length drift changes embedding geometry"
+  ],
+  "how_it_works": "Indexing is completely standard: a PDF is loaded and split into 500-character chunks with 100 overlap via the repo's encode_pdf helper, embedded with OpenAIEmbeddings, and stored in a FAISS index. The novelty is entirely at query time inside a custom HyDERetriever class. Its PromptTemplate takes the user query plus the chunk_size and instructs gpt-4o-mini (temperature=0, max_tokens=4000) to 'generate a hypothetical document that directly answers this question... exactly {chunk_size} characters' — deliberately shaping the fake answer to the same length as the indexed chunks so its embedding sits in the same distribution. The chain (hyde_prompt | llm) produces the hypothetical document; retrieve() then calls vectorstore.similarity_search(hypothetical_doc, k=3), i.e. the hypothetical text replaces the query as the search key, and both the retrieved chunks and the hypothetical document are returned for inspection. No reranking, fusion with the original query, or answer generation is performed in this notebook — it is a pure drop-in retriever substitution, so it composes freely with any downstream RAG generation step.",
+  "key_dependencies": [
+    "langchain (PromptTemplate, chain composition via | operator)",
+    "langchain-openai (ChatOpenAI gpt-4o-mini, OpenAIEmbeddings)",
+    "FAISS vector store (via repo helper encode_pdf)",
+    "OpenAI API key (python-dotenv for loading)",
+    "repo helper_functions.py (encode_pdf, text_wrap, show_context) and evaluation/evalute_rag.py"
+  ],
+  "key_code_signals": [
+    "class HyDERetriever with generate_hypothetical_document() and retrieve() methods",
+    "PromptTemplate(input_variables=[\"query\", \"chunk_size\"], template=\"...generate a hypothetical document that directly answers this question... exactly {chunk_size} characters\")",
+    "self.hyde_chain = self.hyde_prompt | self.llm",
+    "self.vectorstore.similarity_search(hypothetical_doc, k=k) — the hypothetical doc, not the query, is the search key",
+    "ChatOpenAI(temperature=0, model_name=\"gpt-4o-mini\", max_tokens=4000)",
+    "encode_pdf(files_path, chunk_size=500, chunk_overlap=100) building a FAISS store with OpenAIEmbeddings"
+  ],
+  "related_techniques": [
+    "hype_hypothetical_prompt_embeddings: alternative — inverts HyDE by generating hypothetical questions per chunk at indexing time, moving the LLM cost off the query path",
+    "query_transformations: sibling family — query rewriting, step-back prompting, and sub-query decomposition are lighter query-side alternatives",
+    "simple_rag: baseline it drops into — HyDERetriever is a swap-in replacement for the vanilla retriever",
+    "fusion_retrieval: composes — HyDE's dense search can be fused with BM25 to hedge against hallucinated hypotheticals",
+    "reranking: composes — retrieve wider with the hypothetical doc, then rerank against the original query to filter drift",
+    "choose_chunk_size: prerequisite tuning — HyDE's prompt explicitly ties hypothetical-document length to the index chunk size"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "HyDE",
+    "hypothetical document embedding",
+    "query expansion",
+    "query transformation",
+    "semantic gap",
+    "query document mismatch",
+    "vocabulary mismatch",
+    "zero-shot dense retrieval",
+    "embedding similarity",
+    "answer-shaped query",
+    "FAISS",
+    "LangChain",
+    "vector search recall",
+    "short query long document",
+    "pseudo-document"
+  ],
+  "summary": "HyDE tackles the query-document distribution gap in dense retrieval: short interrogative queries embed far from the long declarative passages that answer them, so vector search misses relevant chunks. Instead of embedding the raw question, HyDE first asks an LLM (gpt-4o-mini, temperature 0) to write a hypothetical document that answers it — deliberately constrained to the same character length as the indexed chunks (500 chars) so its embedding falls in the chunk distribution — then runs FAISS similarity_search with that fake document as the query key. The factual accuracy of the hypothetical text matters less than its surface form and vocabulary, which pull the search vector into the neighborhood of real answer passages. Implementation is a small LangChain HyDERetriever class over a standard PDF-to-FAISS pipeline; it is a pure query-time, drop-in retriever swap needing no re-indexing. Costs: one extra LLM call per query (latency and money), and retrieval degrades if the LLM hallucinates off-domain content. Prefer it for question-style queries over expository corpora; skip it for keyword or entity lookups.",
+  "notes_for_chunking": "Small, cleanly structured notebook (~20 cells). Cell 0 is a promotional book banner — strip it. Cell 1 is one large, well-organized markdown overview with ## sections (Overview, Motivation, Key Components, Method Details, Key Features, Benefits, Implementation Details, Conclusion) that is fully self-contained and ideal as a standalone concept chunk. Cells 2-3 are HTML img tags referencing SVG diagrams (no alt content worth keeping). Cells 4-10 are boilerplate: pip install, git clone + sys.path hack, wildcard helper imports (from helper_functions import *), wget data download (duplicated line), and a path variable — strip or collapse. The entire technique lives in one code cell (cell 12, the HyDERetriever class) preceded by a good ### header; keep header + class together as the canonical implementation chunk. Cells 13-18 are trivial usage/demo (instantiate, retrieve, print) — can be merged into one small usage chunk. Cell 19 is a tracking pixel — strip. Markdown/code ratio is high; header quality is good at both # and ### levels; no giant outputs present (notebook stored without outputs).",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/hyde_hypothetical_document_embedding.json"
+}

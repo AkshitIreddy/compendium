@@ -1,0 +1,76 @@
+{
+  "slug": "query_transformations",
+  "title": "Query Transformations (Rewriting, Step-back Prompting, Sub-query Decomposition)",
+  "one_liner": "Use an LLM to reformulate the user's query before retrieval — making it more specific (rewriting), more general (step-back), or splitting it into simpler sub-queries (decomposition) — so it better matches relevant documents.",
+  "stage": "query-transformation",
+  "problem_solved": "Raw user queries are often a poor match for what is actually stored in the vector index: they can be too vague (retrieving generic chunks), too narrow (missing necessary background context), or too complex/multi-faceted (a single embedding cannot cover all sub-topics, so retrieval only answers part of the question). This technique inserts an LLM step between the user and the retriever that rewrites, broadens, or decomposes the query so each retrieval call is aimed at content that actually exists in the corpus.",
+  "failure_modes": [
+    "Users ask vague or underspecified questions and retrieval returns generic, off-topic chunks",
+    "The wording of user queries doesn't match the vocabulary or phrasing used in the corpus, so semantically relevant documents are missed",
+    "Complex multi-part questions get only partially answered because a single query embedding can't cover every aspect",
+    "Very specific questions retrieve narrow chunks but miss the broader background/context needed for a grounded answer",
+    "Questions that require covering several distinct sub-topics (multi-aspect or lightly multi-hop) pull in chunks for only one sub-topic"
+  ],
+  "when_to_use": [
+    "Your users type short, ambiguous, or conversational queries while your corpus is written in precise/technical language",
+    "Retrieval quality is the bottleneck (relevant docs exist in the index but aren't being retrieved) rather than generation quality",
+    "Queries are frequently complex or multifaceted — e.g. research, legal, or analyst-style questions that bundle several sub-questions",
+    "Specific questions need surrounding conceptual context to answer well (step-back retrieval of background material)",
+    "You want a cheap, index-agnostic improvement: no re-indexing or re-chunking required, only a pre-retrieval LLM call",
+    "You can tolerate one extra LLM round-trip of latency per query (or 2-4 extra retrievals for decomposition)"
+  ],
+  "tradeoffs": [
+    "Adds at least one extra LLM call per user query (cost + latency); sub-query decomposition multiplies retrieval calls by 2-4 and inflates the context window with results from every sub-query",
+    "The rewriter can drift: an over-specific rewrite may hallucinate constraints the user never stated and retrieve the wrong documents; there is no guard/validation step in this implementation",
+    "Step-back queries deliberately broaden scope, which can pull in loosely related background chunks and dilute precision if used indiscriminately",
+    "Naive string parsing of the decomposition output (splitting on newlines) is brittle — the demo output even includes the echoed original query as a 'sub-query'",
+    "Not useful when queries are already well-formed and specific, or when the real problem is chunking/indexing quality — transforming a query can't retrieve content that isn't indexed well",
+    "Merging results from multiple sub-queries needs a downstream strategy (dedup, fusion, reranking) that this notebook does not provide",
+    "Notebook demonstrates only the query-generation half; it never actually runs retrieval, so integration and evaluation are left to the adopter"
+  ],
+  "how_it_works": "Three independent, single-call LLM transformations are built with LangChain prompt-template pipelines over ChatOpenAI (gpt-4o, temperature=0). (1) Query rewriting: a PromptTemplate instructs the model to reformulate the original query to be 'more specific, detailed, and likely to retrieve relevant information'; the chain is `query_rewrite_prompt | re_write_llm` wrapped in rewrite_query(). (2) Step-back prompting: a second template asks for a broader, more general version of the query to fetch background context (generate_step_back_query()). (3) Sub-query decomposition: a third template with a few-shot example asks the model to break a complex query into 2-4 simpler sub-queries; decompose_query() splits the response on newlines to produce a list. Each transformed query (or list of sub-queries) is then meant to be sent to the retriever in place of — or alongside — the original query; the notebook stops at generating the queries and does not implement the retrieval/merge step. The technique operates purely at the query-transformation stage but implies downstream retrieval and post-retrieval merging when decomposition is used.",
+  "key_dependencies": [
+    "langchain (PromptTemplate, LCEL pipe composition)",
+    "langchain-openai (ChatOpenAI)",
+    "OpenAI API (gpt-4o)",
+    "python-dotenv (API key loading)"
+  ],
+  "key_code_signals": [
+    "from langchain_openai import ChatOpenAI",
+    "from langchain.prompts import PromptTemplate",
+    "ChatOpenAI(temperature=0, model_name=\"gpt-4o\", max_tokens=4000)",
+    "query_rewriter = query_rewrite_prompt | re_write_llm",
+    "def rewrite_query(original_query)",
+    "def generate_step_back_query(original_query)",
+    "def decompose_query(original_query) -> List[str] via response.split('\\n')"
+  ],
+  "related_techniques": [
+    "HyDe_Hypothetical_Document_Embedding: alternative query-side transformation — embeds a hypothetical answer document instead of rewriting the question",
+    "HyPE_Hypothetical_Prompt_Embeddings: alternative that fixes query-document mismatch at indexing time instead of query time",
+    "fusion_retrieval: composes — results from multiple sub-queries or query variants can be merged with rank fusion",
+    "reranking: composes — rerank the pooled results retrieved by transformed/decomposed queries",
+    "adaptive_retrieval: refines — classify the query first and apply the appropriate transformation strategy per query type",
+    "graph_rag: alternative for genuinely multi-hop questions where decomposition into independent sub-queries is insufficient"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "query rewriting",
+    "query transformation",
+    "query expansion",
+    "step-back prompting",
+    "sub-query decomposition",
+    "query decomposition",
+    "multi-part question",
+    "vague query",
+    "ambiguous query",
+    "vocabulary mismatch",
+    "pre-retrieval",
+    "query reformulation",
+    "complex question answering",
+    "LLM query rewrite",
+    "RAG retrieval quality"
+  ],
+  "summary": "Query transformations improve RAG retrieval by reformulating the user's query with an LLM before it hits the retriever, instead of changing the index or chunks. The notebook implements three independent strategies as LangChain prompt-template chains over GPT-4o: (1) query rewriting makes vague queries more specific and detailed so they match precise corpus language; (2) step-back prompting generates a broader, more general query to retrieve background context that a narrow question would miss; (3) sub-query decomposition splits a complex, multifaceted question into 2-4 simpler sub-queries so each aspect gets its own retrieval pass. Use it when relevant documents exist in the index but aren't retrieved because queries are ambiguous, mismatched with corpus vocabulary, or bundle multiple sub-questions. Costs: one extra LLM call per query (2-4 extra retrievals for decomposition), added latency, possible rewrite drift, and a required downstream merge/dedup/rerank step for sub-query results. It is index-agnostic, trivially composable with fusion and reranking, and one of the cheapest retrieval-quality levers to adopt.",
+  "notes_for_chunking": "Very clean, small notebook (18 cells). Cell-1 is a single large, fully self-contained overview markdown cell describing motivation, all three methods, benefits, and example — it is the highest-value chunk and could stand alone. The body follows a strict repeating pattern: '### N - Technique name' markdown header, one code cell defining the prompt template + chain + wrapper function, a '### Demonstrate on a use case' markdown cell, and a demo code cell with a short text output. Each of the three technique sections is fully self-contained (own LLM instance, own template, own function) and should be chunked as one unit each (header + implementation + demo + output). Junk to strip: cell-0 (book advertisement), cell-3 (pip install), cell-17 (view-tracker image link); cell-4 (dotenv/API-key boilerplate) is low value. Outputs are short plain text (example transformed queries) and are actually informative — keep them. No base64 blobs, no giant outputs. Markdown/code ratio roughly 50/50; headers are descriptive and reliable for splitting.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/query_transformations.json"
+}

@@ -1,0 +1,77 @@
+{
+  "slug": "contextual_chunk_headers",
+  "title": "Contextual Chunk Headers (CCH)",
+  "one_liner": "Prepend an LLM-generated document title (and optionally summary or section hierarchy) to every chunk before embedding, so chunks carry the document-level context they lose during splitting.",
+  "stage": "chunking",
+  "problem_solved": "After splitting, individual chunks lose document- and section-level context: they refer to their subject via pronouns and implicit references, so they are not retrieved when relevant and are misinterpreted by the LLM when they are retrieved, causing missed answers and hallucinations.",
+  "failure_modes": [
+    "A chunk is clearly about my query topic but never names the entity, so vector search and rerankers score it as irrelevant (e.g. a Nike 10-K chunk about climate risk that never says 'Nike')",
+    "Chunks refer to their subject with pronouns or implicit references ('the company', 'this method'), so retrieval misses them",
+    "The LLM misreads a retrieved chunk because it lacks surrounding document context, producing hallucinated or misleading answers",
+    "In a multi-document corpus (many 10-Ks, many papers), similar-sounding chunks from the wrong document pollute the results because embeddings do not encode which document a chunk came from",
+    "Irrelevant chunks show up in search results at a high rate, degrading downstream generation"
+  ],
+  "when_to_use": [
+    "Your corpus contains many documents about similar subjects (e.g. ~70 company 10-Ks, hundreds of academic papers) where knowing which document a chunk belongs to is the key discriminating signal",
+    "Your documents are long reports, filings, legal opinions, or handbooks where a chunk only makes sense in the context of its document or section",
+    "Documents have (or can cheaply get) descriptive titles; if not, one small LLM call per document generates one from the first ~4000 tokens",
+    "You want a cheap, high-leverage retrieval-quality improvement before reaching for heavier techniques -- it composes with any chunking method and any retriever/reranker",
+    "You already use a reranker: applying the same header+chunk concatenation at rerank time gives large relevance gains (0.11 -> 0.92 on the notebook's example)"
+  ],
+  "tradeoffs": [
+    "Requires re-embedding/re-indexing the whole corpus to adopt; one LLM call per document at index time (more if you also generate summaries or section titles)",
+    "Header tokens inflate every embedded chunk and every retrieved passage, slightly increasing embedding cost, index size, and prompt token usage",
+    "Consistency burden: the exact header+chunk concatenation must be used at embedding time, rerank time, and when presenting chunks to the LLM, or gains disappear",
+    "Small benefit when the corpus is a single document or documents are short and self-contained (KITE's Sourcegraph dataset improved only 5.7 -> 5.8, vs BVP Cloud 10-Ks 2.6 -> 6.3)",
+    "Document-level headers can over-boost within-document matches: chunks from the right document but the wrong passage may score higher than they should",
+    "The notebook only demonstrates the title-only header; summaries and section hierarchies (recommended in the writeup) add further LLM calls and engineering"
+  ],
+  "how_it_works": "Indexing-time context enrichment applied at the chunking stage. The document is split with a standard splitter (LangChain RecursiveCharacterTextSplitter, chunk_size=800, overlap=0 in the demo). A single gpt-4o-mini call, fed the document's first MAX_CONTENT_TOKENS=4000 tokens (truncated via tiktoken), generates a descriptive document title using a constrained prompt (DOCUMENT_TITLE_PROMPT); existing titles can be used directly. Each chunk is then stored/embedded as the concatenation 'Document Title: {title}\\n\\n{chunk_text}' -- optionally extended with a concise document summary and the section/sub-section hierarchy. The same concatenation must be used by the reranker and included when passing retrieved chunks to the generation LLM (so the technique also touches the indexing and post-retrieval stages). The notebook quantifies impact with Cohere rerank-english-v3.0 as a relevance judge: for a Nike 10-K chunk about climate risk that never mentions Nike, relevance to the query 'Nike climate change impact' jumps from 0.106 without the header to 0.922 with it. On the author's KITE benchmark, CCH (title + summary) raises the average score from 4.72 to 6.04 (+27.9%); combined with relevant segment extraction it scored 83% vs a 19% baseline on FinanceBench.",
+  "key_dependencies": [
+    "openai (gpt-4o-mini for title generation)",
+    "cohere (rerank-english-v3.0 for relevance scoring demo)",
+    "tiktoken (token counting and document truncation)",
+    "langchain-text-splitters (RecursiveCharacterTextSplitter)",
+    "python-dotenv (API key loading)"
+  ],
+  "key_code_signals": [
+    "chunk_w_header = f\"Document Title: {document_title}\\n\\n{chunk_text}\" -- the core header-prepend operation",
+    "get_document_title(document_text) prompting gpt-4o-mini with DOCUMENT_TITLE_PROMPT ('Your response MUST be the title of the document, and nothing else')",
+    "truncate_content(content, MAX_CONTENT_TOKENS=4000) using tiktoken.encoding_for_model to cap the title-generation input",
+    "RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=0) for baseline chunking",
+    "cohere.Client().rerank(model='rerank-english-v3.0', query=query, documents=chunks) to score chunks",
+    "compare_chunk_similarities() printing similarity with vs without the header for the same chunk"
+  ],
+  "related_techniques": [
+    "relevant_segment_extraction: composes with (evaluated jointly on FinanceBench for 83% vs 19% baseline)",
+    "semantic_chunking: composes with (CCH layers on top of any chunking method)",
+    "proposition_chunking: alternative (rewrites chunks into self-contained facts instead of prepending context)",
+    "context_enrichment_window_around_chunk: alternative (adds neighboring sentences rather than document-level context)",
+    "contextual_compression: complementary post-retrieval step (compresses retrieved context rather than enriching indexed chunks)",
+    "reranking: composes with (the header+chunk concatenation must also be fed to the reranker)",
+    "document_augmentation: related indexing-time enrichment (generates questions instead of headers)",
+    "HyDE: alternative that attacks query/chunk mismatch from the query side instead of the chunk side"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "contextual chunk headers",
+    "CCH",
+    "prepend document title to chunks",
+    "chunk lacks context",
+    "chunks lose document context",
+    "pronoun references in chunks",
+    "implicit references retrieval failure",
+    "chunk header embedding",
+    "context enrichment",
+    "multi-document confusion",
+    "10-K retrieval",
+    "section hierarchy header",
+    "document title metadata",
+    "contextual retrieval",
+    "reranker relevance score",
+    "reduce hallucination from ambiguous chunks"
+  ],
+  "summary": "Contextual Chunk Headers (CCH) targets the core RAG failure where chunks lose document- and section-level context after splitting: a Nike 10-K chunk about climate risk never says 'Nike', so it is neither retrieved for 'Nike climate change impact' nor correctly interpreted by the LLM, driving missed answers and hallucinations. CCH prepends a short header -- at minimum the document title, optionally a concise summary and section/sub-section hierarchy -- to every chunk before embedding, so the embedding represents what the chunk is actually about. The notebook generates the title with one gpt-4o-mini call over the first ~4000 tokens (tiktoken truncation), splits with RecursiveCharacterTextSplitter (800 chars, no overlap), and shows Cohere rerank-english-v3.0 relevance jumping from 0.11 to 0.92 once the header is added. The same header+chunk concatenation must be used at rerank time and when presenting results to the generator. On KITE, CCH lifted average scores 4.72 to 6.04 (+27.9%), with the biggest gains on multi-company 10-K corpora; with relevant segment extraction it hit 83% vs 19% baseline on FinanceBench. Cost: one LLM call per document at index time, slightly larger embeddings, and a full re-index.",
+  "notes_for_chunking": "Structure: 17 cells, roughly half markdown. Cell 0 is a book-promo ad -- strip. Cell 1 is a long, high-quality intro markdown with '## Overview / Motivation / Key Components / Method Details' subsections that is fully self-contained and ideal as a standalone concept chunk. Cell 2 is an image reference (../images/contextual_chunk_headers.svg) -- strip or keep as pointer only. Cells 4-6 and 8 are boilerplate (pip install, wget data downloads, dotenv/API-key setup) -- strip. Code cells (9, 11, 13) carry verbose docstrings that duplicate the markdown; each is preceded by a short '## ...' markdown header, so header+code pairs form natural chunks. Cell outputs are short and informative (generated title string; the 0.106-vs-0.922 similarity comparison) -- worth keeping, no giant outputs or base64 blobs. Cell 15 is a self-contained '# Eval results' markdown with two benchmark tables (KITE, FinanceBench) -- keep as its own chunk. Cell 16 is a tracking-pixel image -- strip.",
+  "file_written": "C:\\Users\\akshi\\Desktop\\Code Palace\\rag knowledge base\\research\\corpus\\contextual_chunk_headers.json"
+}

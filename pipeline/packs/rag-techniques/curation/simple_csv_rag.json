@@ -1,0 +1,77 @@
+{
+  "slug": "simple_csv_rag",
+  "title": "Simple RAG over CSV Files (Row-Level Ingestion with CSVLoader + FAISS)",
+  "one_liner": "Turns each CSV row into a retrievable 'column: value' document, embeds it with OpenAI embeddings into a FAISS index, and answers natural-language questions about tabular records with a stuff-documents QA chain.",
+  "stage": "indexing",
+  "problem_solved": "Standard RAG loaders treat files as running prose, which destroys the row/column structure of tabular data; this technique ingests a CSV so that each record becomes a self-contained, semantically searchable document, enabling plain-English Q&A over structured records (e.g. customer tables) without writing SQL or a custom parser.",
+  "failure_modes": [
+    "My data lives in CSV/spreadsheet files and my RAG pipeline can't answer questions about it",
+    "Naive text chunking splits table rows apart so retrieved chunks mix fields from different records",
+    "Retrieved chunk contains a value but not the column name, so the LLM can't tell what the number or string means",
+    "Users ask lookup questions about a specific record ('which company does X work for?') and free-text retrieval returns unrelated passages",
+    "I need a quick natural-language Q&A interface over a small structured dataset without building a text-to-SQL system"
+  ],
+  "when_to_use": [
+    "Your corpus is one or more CSV files of records (customers, products, tickets) and queries are per-record lookups or descriptions",
+    "Each row is short and self-contained, so a single row is a natural retrieval unit",
+    "You want a working tabular Q&A prototype in ~30 lines using off-the-shelf LangChain components",
+    "Questions reference entity names or attribute values that appear verbatim in the data, so embedding similarity can find the right row",
+    "You are new to RAG and want the canonical minimal pipeline (load -> embed -> FAISS -> retrieve -> stuff -> answer) applied to structured data"
+  ],
+  "tradeoffs": [
+    "Cannot do aggregation, filtering, sorting, or counting ('how many customers joined in 2021?') — retrieval only surfaces top-k rows, so analytical queries need text-to-SQL or a pandas/dataframe agent instead",
+    "Embedding every row costs one OpenAI embedding call per row and scales linearly with table size; large tables inflate index build cost and may bury the right row among near-duplicate records",
+    "Flat L2 FAISS index (IndexFlatL2) is exact but brute-force; fine for hundreds/thousands of rows, wrong choice for millions",
+    "Default retriever settings (top-k, no score threshold) and no reranking: multi-row or fuzzy questions easily retrieve the wrong records",
+    "Numeric and date semantics are handled poorly by text embeddings — 'customers subscribed after 2020' will not reliably match rows",
+    "In-memory docstore and index: no persistence story out of the box",
+    "Do NOT use when the table is wide/huge, when queries are analytical rather than lookup-style, or when exact-match filtering (IDs, emails) matters — a database query is cheaper and correct"
+  ],
+  "how_it_works": "The pipeline is a minimal end-to-end RAG system specialized for tabular input. (1) Indexing (dominant stage): pandas previews the CSV, then LangChain's CSVLoader.load_and_split() converts every row into a Document whose page_content is a newline-separated list of 'column: value' pairs — preserving the field-name-to-value binding that naive chunking would lose. (2) A FAISS vector store is built explicitly: OpenAIEmbeddings sizes an IndexFlatL2 (exact L2 search) via a probe embed_query call, wrapped with an InMemoryDocstore, and the row-documents are added with add_documents. (3) Retrieval: vector_store.as_retriever() with default settings fetches the most similar row-documents for a query. (4) Generation: create_stuff_documents_chain packs retrieved rows into a concise-answer system prompt ('say you don't know', max three sentences) for ChatOpenAI gpt-3.5-turbo-0125, and create_retrieval_chain wires retriever and QA chain together. A sample query ('which company does sheryl Baxter work for?') is answered from the retrieved customer row. The technique's novelty is entirely in the ingestion/indexing choice — retrieval and generation are the stock simple-RAG pattern.",
+  "key_dependencies": [
+    "langchain / langchain-community (CSVLoader, FAISS vector store wrapper, InMemoryDocstore, chains)",
+    "langchain-openai (ChatOpenAI, OpenAIEmbeddings)",
+    "faiss-cpu (IndexFlatL2)",
+    "pandas (CSV preview only)",
+    "python-dotenv (API key loading)",
+    "OpenAI API (embeddings + gpt-3.5-turbo-0125)"
+  ],
+  "key_code_signals": [
+    "from langchain_community.document_loaders.csv_loader import CSVLoader",
+    "loader.load_and_split()",
+    "faiss.IndexFlatL2(len(OpenAIEmbeddings().embed_query(\" \")))",
+    "FAISS(embedding_function=..., index=index, docstore=InMemoryDocstore(), index_to_docstore_id={})",
+    "vector_store.add_documents(documents=docs)",
+    "vector_store.as_retriever()",
+    "create_stuff_documents_chain(llm, prompt)",
+    "create_retrieval_chain(retriever, question_answer_chain)"
+  ],
+  "related_techniques": [
+    "simple_rag: unstructured-document counterpart — same pipeline over PDF/text instead of CSV rows",
+    "simple_csv_rag_with_llamaindex: alternative — identical technique implemented with LlamaIndex instead of LangChain",
+    "json_rag: sibling — same 'RAG over structured data' family for JSON instead of CSV",
+    "choose_chunk_size: refines — chunking granularity tuning is moot here because the row is the natural unit, but relevant if rows are long",
+    "reranking: composes — a reranker over retrieved rows helps when many near-duplicate records exist",
+    "reliable_rag: refines — adds relevance checking/grounding on top of this foundational pipeline"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "csv",
+    "tabular data",
+    "structured data rag",
+    "spreadsheet question answering",
+    "CSVLoader",
+    "row-level chunking",
+    "faiss",
+    "openai embeddings",
+    "langchain retrieval chain",
+    "customer data qa",
+    "table lookup",
+    "natural language query over table",
+    "basic rag",
+    "foundational rag"
+  ],
+  "summary": "Foundational technique for doing RAG over tabular CSV data. Instead of treating a CSV as raw text (where generic chunking splits rows apart and separates values from their column names), LangChain's CSVLoader converts every row into its own Document of 'column: value' lines, preserving record structure and field semantics. Rows are embedded with OpenAIEmbeddings into an exact-search FAISS IndexFlatL2 with an in-memory docstore, exposed via as_retriever(), and answered by a stuff-documents chain (create_retrieval_chain + create_stuff_documents_chain) on gpt-3.5-turbo with a concise 'say you don't know' prompt. Solves per-record lookup questions ('which company does Sheryl Baxter work for?') over datasets like customer tables without SQL. It is strictly a semantic-lookup approach: it cannot aggregate, count, filter by numeric/date ranges, or join — for analytical queries prefer text-to-SQL or a dataframe agent. Costs are one embedding call per row and a brute-force index, fine for small-to-medium tables, poor for millions of rows or near-duplicate records. Best as a starting point that later composes with reranking, retrieval filtering, or reliability checks.",
+  "notes_for_chunking": "Small notebook (~20 cells), roughly 50/50 markdown/code with short cells. Cell 0 is a promotional book ad (strip). Cell 1 is a large, well-structured overview markdown with '##' headers (Overview, Key Components, Method Details, Benefits, Conclusion) — the highest-value prose, self-contained. Subsequent section headers are inconsistent: some are terse lowercase fragments with typos ('import libries', 'load and process csv data'), others are '#' headers; header quality is too weak to rely on alone, so pair each markdown cell with its following code cell as one chunk. Junk to strip: pip install cell, a wget download cell that also fetches an unrelated PDF (copy-paste artifact from the simple_rag notebook), the pandas .head() output table (medium-size text output), and a final tracking-pixel markdown image cell. No base64 blobs. Code cells are individually meaningful (loader, vector store init, chain assembly, query) and map 1:1 to pipeline stages, making stage-per-chunk a natural split.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/simple_csv_rag.json"
+}

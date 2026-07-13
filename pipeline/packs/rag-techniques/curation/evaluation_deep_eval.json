@@ -1,0 +1,76 @@
+{
+  "slug": "evaluation_deep_eval",
+  "title": "RAG Evaluation with DeepEval (Correctness, Faithfulness, Contextual Relevancy)",
+  "one_liner": "Score RAG outputs with DeepEval's LLM-as-judge metrics — GEval correctness, faithfulness, and contextual relevancy — over batchable test cases built from questions, ground truths, answers, and retrieved contexts.",
+  "stage": "evaluation",
+  "problem_solved": "Without systematic evaluation you cannot tell whether a RAG pipeline hallucinates, retrieves irrelevant chunks, or answers incorrectly — nor whether a change to chunking, retrieval, or prompting made quality better or worse. This technique turns RAG quality into measurable, thresholded, repeatable test cases scored by a judge LLM.",
+  "failure_modes": [
+    "My RAG system produces answers that aren't supported by the retrieved documents (hallucination / ungrounded generation) and I have no automated way to catch it",
+    "I can't tell whether the chunks my retriever returns are actually relevant to the user's question or just vector-similar noise",
+    "Generated answers are factually wrong compared to known ground-truth answers and I only find out from user complaints",
+    "I changed chunk size / retriever / reranker / prompt and have no regression signal to know if quality improved or degraded",
+    "I evaluate my pipeline by eyeballing a few outputs instead of a repeatable pass/fail quality gate",
+    "When quality is bad, I can't tell whether the failure is in retrieval (bad context) or generation (bad answer despite good context)"
+  ],
+  "when_to_use": [
+    "You have (or can curate) a test set of questions with ground-truth answers and want automated correctness scoring",
+    "You are A/B comparing pipeline variants (chunking strategy, retriever, reranker, prompt) and need per-metric numbers instead of vibes",
+    "You want CI-style regression tests for a RAG system with thresholded pass/fail metrics (e.g. faithfulness >= 0.7)",
+    "You need to localize failures: ContextualRelevancyMetric isolates retrieval problems while FaithfulnessMetric and GEval correctness isolate generation problems",
+    "You want natural-language reasons attached to failing scores (include_reason=True) to speed up debugging",
+    "You already log questions, generated answers, and retrieved contexts and can zip them into test cases at dataset scale"
+  ],
+  "tradeoffs": [
+    "Every test case x metric pair costs one or more judge-LLM calls to GPT-4-class models — evaluation cost and latency scale linearly with dataset size",
+    "The GEval correctness metric requires curated ground-truth answers, which is a real labeling effort for domain corpora",
+    "LLM-as-judge scores are nondeterministic and biased by the judge model; thresholds (0.7, 1.0) need calibration per domain and scores can drift when the judge model version changes",
+    "Measures answer/context quality only — it does not compute classic retrieval metrics like recall@k, hit rate, or MRR against labeled relevant documents",
+    "It is diagnostic, not corrective: it detects hallucination and retrieval noise but you still need other techniques (reranking, context enrichment, query transformation) to fix them",
+    "Overkill for quick prototypes; adds the deepeval dependency and an OpenAI API cost footprint",
+    "The notebook's examples are toy-scale (e.g. 'what is 3+3?'); production use requires building a genuine test dataset first"
+  ],
+  "how_it_works": "The technique operates purely at the evaluation stage, wrapping an existing RAG pipeline's inputs and outputs in DeepEval LLMTestCase objects: each test case carries input (the question), expected_output (ground-truth answer), actual_output (the pipeline's generated answer), and retrieval_context (the list of retrieved chunks). Three judge-LLM metrics are then applied. (1) Correctness via GEval: a custom rubric metric configured with model='gpt-4o', evaluation_params=[EXPECTED_OUTPUT, ACTUAL_OUTPUT], and a plain-English evaluation_steps instruction ('Determine whether the actual output is factually correct based on the expected output'); the judge returns a 0-1 score. (2) FaithfulnessMetric(threshold=0.7, model='gpt-4'): checks whether claims in actual_output are grounded in retrieval_context, catching hallucination independent of ground truth. (3) ContextualRelevancyMetric(threshold=1, model='gpt-4', include_reason=True): checks whether the retrieved chunks are relevant to the input query, with a generated textual reason. Each metric supports metric.measure(test_case) for single-case scoring (exposing .score and .reason), and deepeval's evaluate(test_cases=[...], metrics=[...]) runs a full matrix of cases x metrics in one call. A helper, create_deep_eval_test_cases(questions, gt_answers, generated_answers, retrieved_documents), zips four parallel lists into LLMTestCase objects so an entire evaluation dataset produced by any RAG pipeline can be scored in batch.",
+  "key_dependencies": [
+    "deepeval (evaluate, metrics.GEval, metrics.FaithfulnessMetric, metrics.ContextualRelevancyMetric, test_case.LLMTestCase, test_case.LLMTestCaseParams)",
+    "OpenAI API (gpt-4o and gpt-4 used as judge models inside the metrics)"
+  ],
+  "key_code_signals": [
+    "from deepeval import evaluate",
+    "from deepeval.metrics import GEval, FaithfulnessMetric, ContextualRelevancyMetric",
+    "GEval(name=\"Correctness\", model=\"gpt-4o\", evaluation_params=[LLMTestCaseParams.EXPECTED_OUTPUT, LLMTestCaseParams.ACTUAL_OUTPUT], evaluation_steps=[...])",
+    "FaithfulnessMetric(threshold=0.7, model=\"gpt-4\", include_reason=False)",
+    "ContextualRelevancyMetric(threshold=1, model=\"gpt-4\", include_reason=True)",
+    "LLMTestCase(input=..., expected_output=..., actual_output=..., retrieval_context=[...])",
+    "evaluate(test_cases=[relevance_test_case, new_test_case], metrics=[correctness_metric, faithfulness_metric, relevance_metric])",
+    "create_deep_eval_test_cases(questions, gt_answers, generated_answers, retrieved_documents)"
+  ],
+  "related_techniques": [
+    "evaluation_grouse: alternative — LLM-judge evaluation using the GroUSE metric framework, plus meta-evaluation of the judge itself",
+    "simple_rag: prerequisite — a working RAG pipeline must produce the questions/answers/contexts that feed the test cases",
+    "retrieval_with_feedback_loop: composes — evaluation scores like these can drive iterative feedback that improves retrieval over time",
+    "choose_chunk_size: composes — use these metrics as the objective when comparing chunking configurations",
+    "reranking: measured-by — ContextualRelevancyMetric quantifies whether reranking actually improved retrieved-context quality",
+    "reliable_rag: refines — DeepEval formalizes the groundedness/relevancy checks that reliable-RAG pipelines apply ad hoc"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "rag evaluation",
+    "deepeval",
+    "llm as judge",
+    "faithfulness metric",
+    "hallucination detection",
+    "groundedness",
+    "contextual relevancy",
+    "geval",
+    "answer correctness",
+    "ground truth test cases",
+    "regression testing rag",
+    "rag quality metrics",
+    "evaluate retrieval quality",
+    "test rag pipeline",
+    "pass fail threshold"
+  ],
+  "summary": "DeepEval-based RAG evaluation: wrap each question with its ground-truth answer, generated answer, and retrieved context in an LLMTestCase, then score it with LLM-as-judge metrics. The notebook demonstrates three metrics: GEval correctness (GPT-4o judges the actual output against the expected output using a plain-English rubric), FaithfulnessMetric (checks whether the generated answer is grounded in the retrieval_context — direct hallucination detection with a 0.7 pass threshold), and ContextualRelevancyMetric (checks whether retrieved chunks are actually relevant to the query, with an explanatory reason). A batch evaluate() call runs multiple test cases against multiple metrics at once, and a helper converts four parallel lists (questions, ground truths, generated answers, retrieved documents) into test cases for dataset-scale regression testing. Use it to detect ungrounded/hallucinated answers, retrieval noise, and factual errors, and to get before/after numbers when changing chunking, retrieval, or prompts. Costs: every case-metric pair is a GPT-4-class judge call, correctness needs curated ground-truth answers, and judge scores carry variance and bias that require threshold calibration.",
+  "notes_for_chunking": "Very small notebook (14 cells, ~1:1 markdown/code ratio) with no stored outputs and no pip-install cell. Structure: cell 0 is a book-promotion markdown block (junk — strip); cell 1 is the consolidated imports cell (deepeval evaluate/metrics/test_case) that every later section depends on — prepend or reference it as context for each chunk; cells 2-7 are three cleanly self-contained metric sections each introduced by a shallow but accurate '### Test X' header (Correctness, faithfulness, contextual relevancy), each containing metric construction + toy LLMTestCase + measure() + print; cells 8-10 form a 'batch evaluate multiple cases with multiple metrics' section whose code depends on objects defined in all three prior sections (not self-contained — chunk with references or merged); cells 11-12 are a self-contained reusable helper (create_deep_eval_test_cases) with its docstring-style markdown header listing the four input lists; cell 13 is an analytics tracker image (junk — strip). Ideal chunking: one chunk per metric section plus one for the batch/helper portion, imports attached to each.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/evaluation_deep_eval.json"
+}

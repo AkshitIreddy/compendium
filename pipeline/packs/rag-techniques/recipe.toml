@@ -1,0 +1,38 @@
+# Recipe for the RAG Techniques pack — the reference notebook-sourced pack.
+# Curation lives in curation/ (technique cards + ontology); the notebook clone
+# is passed at build time: python -m compendium_pack build packs/rag-techniques --source <clone>
+
+[pack]
+id = "rag-techniques"
+version = "2026.07.0"
+name = "RAG Techniques"
+description = "39 retrieval-augmented-generation techniques and 5 evaluation methodologies from NirDiamant/RAG_Techniques, analyzed into structured cards with a failure-mode ontology and typed relation graph."
+source_type = "notebook"
+
+[source]
+repo = "https://github.com/NirDiamant/RAG_Techniques"
+
+[license]
+id = "custom-noncommercial-nirdiamant"
+text = """Adapted from NirDiamant/RAG_Techniques under its Custom License Agreement:
+non-commercial use only; all commercial rights reserved by the Licensor (Nir Diamant).
+This pack contains modified/derived content (summaries, structured analyses, processed
+notebook text). Redistribution of this pack must remain non-commercial and retain this
+notice. Original license: https://github.com/NirDiamant/RAG_Techniques/blob/main/LICENSE"""
+attribution_html = """Techniques adapted (with modifications) from <a href="https://github.com/NirDiamant/RAG_Techniques">RAG_Techniques</a> by <strong>Nir Diamant</strong>, used under its custom non-commercial license. Content has been modified: analyzed, summarized, and restructured. No endorsement by or affiliation with the author is implied."""
+
+[embedding]
+model = "embed-v4.0"
+dims = 1024
+input_type = "search_document"
+
+[index]
+connectivity = 24
+expansion_add = 384
+expansion_search = 192
+quantization = "f16"
+recall_gate = 0.98
+
+[processor.vendor_disclosures]
+agentic_rag = "This notebook is built on Contextual AI's managed platform; adopting it as-is implies a commercial vendor dependency. The agentic patterns it demonstrates are general."
+graphrag_with_milvus_vectordb = "This notebook is sponsored by Zilliz and demonstrates Milvus as the vector database; the graph-RAG approach itself is vendor-neutral."

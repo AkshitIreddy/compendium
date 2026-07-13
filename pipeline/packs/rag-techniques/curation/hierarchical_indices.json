@@ -1,0 +1,80 @@
+{
+  "slug": "hierarchical_indices",
+  "title": "Hierarchical Indices (Two-Tier Summary + Chunk Retrieval)",
+  "one_liner": "Builds two linked vector stores - LLM-generated page-level summaries and detailed chunks sharing page metadata - then retrieves coarse-to-fine: find relevant summaries first, then search chunks filtered to those pages.",
+  "stage": "indexing",
+  "problem_solved": "Flat top-k vector search over a large corpus of small chunks retrieves passages that are locally similar to the query but come from irrelevant sections or documents, losing section-level context and polluting the context window. Hierarchical indexing first routes the query to the most relevant document sections via summary search, then retrieves detailed chunks only from within those sections, improving precision and context-awareness at scale.",
+  "failure_modes": [
+    "Retrieved chunks match the query wording but come from the wrong section or document entirely",
+    "Retrieved chunks lack surrounding context - the answer depends on which section/document they belong to",
+    "Flat vector search over a large corpus or a long book returns noisy, off-topic, or near-duplicate chunks",
+    "Irrelevant chunks pollute the context window and crowd out the passages that actually answer the question",
+    "Search quality degrades as the corpus grows because every chunk competes globally in one flat index"
+  ],
+  "when_to_use": [
+    "Your documents are long (books, legal documents, technical reports, manuals) where knowing the right section matters as much as the right sentence",
+    "Your corpus is large enough that flat chunk search returns plausible-looking but wrong-section hits",
+    "Your documents have natural units (pages, sections, chapters) that can carry shared metadata linking summary and chunk levels",
+    "You can afford a one-time LLM summarization pass over every page/section at index build time",
+    "You want retrieval results grouped by document region so downstream generation sees coherent context"
+  ],
+  "tradeoffs": [
+    "Expensive index build: one map-reduce LLM summarization call per page/document; the notebook needs batching (batch_size=5) and exponential backoff just to survive rate limits",
+    "Hard recall ceiling: if the correct page's summary does not rank in the top k_summaries, its chunks can never be retrieved - a routing error at the summary level is unrecoverable",
+    "Two vector stores to build, persist, and keep in sync - roughly double the index maintenance",
+    "The FAISS metadata filter used here is a post-hoc Python lambda, which scans/over-fetches; production scale needs a vector DB with native metadata filtering",
+    "Returns up to k_summaries * k_chunks chunks with no dedup or cross-page reranking; usually needs a reranker on top",
+    "Section granularity is just the PDF page, which may not align with real semantic sections",
+    "Overkill for small corpora or short documents where flat top-k retrieval already works; adds latency (two sequential similarity searches) for no gain"
+  ],
+  "how_it_works": "Index build (dominant stage): PyPDFLoader loads the PDF as one Document per page. Each page is summarized asynchronously with ChatOpenAI(model_name='gpt-4o-mini') via load_summarize_chain(chain_type='map_reduce'), wrapped in retry_with_exponential_backoff and processed in batches of 5 with asyncio.gather to handle API rate limits. Each summary becomes a Document carrying metadata {source, page, summary: True}. The same pages are independently split into detailed chunks with RecursiveCharacterTextSplitter (chunk_size=1000, chunk_overlap=200), each chunk tagged with chunk_id and its page number - the shared 'page' field is the link between tiers. Two FAISS stores are built concurrently with OpenAIEmbeddings and persisted via save_local/load_local to avoid recomputation. Retrieval (secondary stage): retrieve_hierarchical(query, k_summaries=3, k_chunks=5) does similarity_search on the summary store, then for each top summary runs similarity_search on the detailed store with a filter lambda restricting matches to that summary's page number, concatenating results. No generation step is included; the notebook ends with retrieval output for 'What is the greenhouse effect?'.",
+  "key_dependencies": [
+    "langchain (load_summarize_chain, Document, RecursiveCharacterTextSplitter, PyPDFLoader)",
+    "langchain-openai (ChatOpenAI gpt-4o-mini, OpenAIEmbeddings)",
+    "FAISS (langchain vectorstore, local persistence)",
+    "asyncio (batched concurrent summarization and embedding)",
+    "python-dotenv (API key loading)",
+    "repo helper_functions module (encode_pdf, encode_from_string, retry_with_exponential_backoff via wildcard import)",
+    "OpenAI API (summarization LLM + embeddings)"
+  ],
+  "key_code_signals": [
+    "encode_pdf_hierarchical(path, chunk_size=1000, chunk_overlap=200) returning (summary_vectorstore, detailed_vectorstore)",
+    "load_summarize_chain(summary_llm, chain_type='map_reduce') with ChatOpenAI(temperature=0, model_name='gpt-4o-mini')",
+    "Document(page_content=summary, metadata={'source': path, 'page': doc.metadata['page'], 'summary': True}) - shared page metadata linking the two tiers",
+    "asyncio.gather over summarize_doc batches + retry_with_exponential_backoff for rate-limit handling",
+    "FAISS.from_documents called twice (summaries, detailed chunks) and save_local/load_local persistence",
+    "retrieve_hierarchical(query, summary_vectorstore, detailed_vectorstore, k_summaries=3, k_chunks=5)",
+    "detailed_vectorstore.similarity_search(query, k=k_chunks, filter=lambda metadata: metadata['page'] == page_number)"
+  ],
+  "related_techniques": [
+    "raptor: refines - generalizes the two-tier idea into a recursive multi-level summary tree",
+    "simple_rag: alternative - the flat single-index baseline this technique replaces",
+    "contextual_chunk_headers: alternative - cheaper way to give chunks document/section context without a second index or summary search",
+    "semantic_chunking: composes - better-aligned chunk boundaries for the detailed tier",
+    "choose_chunk_size: composes - tunes the chunk_size/chunk_overlap parameters of the detailed tier",
+    "multi_faceted_filtering: composes - the drill-down step is metadata filtering; that notebook covers richer filter strategies",
+    "reranking: composes - rerank/dedup the merged k_summaries*k_chunks result list before generation",
+    "document_augmentation: alternative - enriches chunks with generated questions instead of building a summary tier"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "hierarchical index",
+    "hierarchical retrieval",
+    "two-tier index",
+    "summary-first retrieval",
+    "coarse-to-fine retrieval",
+    "drill-down retrieval",
+    "document summaries index",
+    "page-level filtering",
+    "parent-child chunks",
+    "multi-level vector store",
+    "large document RAG",
+    "long PDF retrieval",
+    "section-aware retrieval",
+    "FAISS metadata filter",
+    "wrong section retrieved"
+  ],
+  "summary": "Hierarchical indices attack the precision problem of flat vector search over long documents: small chunks match query wording from the wrong section, and section-level context is lost. At index time, each PDF page is summarized by an LLM (gpt-4o-mini via LangChain's map_reduce summarize chain, run asynchronously in batches with exponential backoff for rate limits), while the same pages are split into 1000-char detailed chunks; both tiers share 'page' metadata and are embedded into two separate persisted FAISS stores using OpenAI embeddings. At query time, retrieve_hierarchical searches the summary store first (top k_summaries=3) to route the query to relevant document sections, then searches the detailed store with a metadata filter restricting hits to those pages (k_chunks=5 each), returning only chunks from sections judged relevant at the summary level. This trades an expensive one-time summarization pass, a second index, and a hard summary-routing recall ceiling for cleaner, section-coherent context and better scaling on large corpora. Best for books, legal documents, and long reports; unnecessary for small corpora where flat top-k retrieval already performs well.",
+  "notes_for_chunking": "Structure: (1) a promotional book-ad markdown cell at the very top and a tracking-pixel markdown image at the very bottom - pure junk, strip both. (2) One very large self-contained front-matter markdown cell (Overview/Motivation/Key Components/Method Details/Benefits/Implementation Details/Conclusion) - excellent standalone doc-level chunk, but its claims should be trusted only where they match code (it says 'GPT-4' while code uses gpt-4o-mini). (3) Two markdown cells that are only <img> tags referencing local SVGs - no textual content, strip or replace with alt text. (4) Boilerplate setup cells: pip install, git clone + sys.path hack, wget data download (duplicated line), dotenv/API-key setup - strip. (5) The substance is two large, well-docstringed code cells (encode_pdf_hierarchical, retrieve_hierarchical), each preceded by a short but accurate '###' markdown header - chunk each header+code pair together; they are self-contained. (6) Wildcard imports from repo-local helper_functions mean key called functions (retry_with_exponential_backoff, PyPDFLoader/FAISS/OpenAIEmbeddings names) are not defined or imported explicitly in the notebook - a chunker should note this external dependency. (7) Outputs are minimal (one deepeval version warning); no giant outputs or base64 blobs.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/hierarchical_indices.json"
+}

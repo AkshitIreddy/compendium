@@ -1,0 +1,86 @@
+{
+  "slug": "adaptive_retrieval",
+  "title": "Adaptive Retrieval (query-type-routed RAG)",
+  "one_liner": "An LLM classifies each query as Factual, Analytical, Opinion, or Contextual and routes it to a specialized retrieval strategy with tailored query rewriting, sub-query decomposition, and LLM-based reranking.",
+  "stage": "retrieval",
+  "problem_solved": "A one-size-fits-all retrieval pipeline (single top-k similarity search with fixed parameters) is suboptimal across heterogeneous query types: factual lookups need precise, focused retrieval; analytical questions need broad multi-aspect coverage; opinion questions need deliberately diverse viewpoints; and context-dependent questions need the user's situation folded into the query. Adaptive retrieval dispatches each query to a strategy designed for its intent.",
+  "failure_modes": [
+    "My retriever works fine for simple fact lookups but gives shallow or one-sided results for broad 'explain/compare/analyze' questions",
+    "Top-k similarity search returns near-duplicate chunks about a single aspect, so multi-faceted questions get incomplete coverage",
+    "Questions about opinions or debates return documents that all take the same side instead of representing multiple viewpoints",
+    "Vaguely or conversationally phrased queries retrieve imprecise chunks because the raw query embedding is a poor search key",
+    "Answers ignore who is asking - queries that depend on user-specific context are retrieved as if they were generic",
+    "Irrelevant chunks slip into the context window because raw vector similarity is the only relevance signal (no reranking)",
+    "Tuning retrieval parameters for one query type degrades quality on other query types in a mixed workload"
+  ],
+  "when_to_use": [
+    "Your query workload is genuinely heterogeneous - a mix of fact lookup, analytical/how-why questions, opinion/debate questions, and personalized questions hitting the same knowledge base (e.g. support portals, research assistants, enterprise Q&A)",
+    "You observe that a single retrieval configuration is a compromise: raising k helps analytical queries but pollutes factual ones, and vice versa",
+    "You have user context (role, history, preferences) available and want contextual queries reformulated to include it",
+    "You can tolerate several extra LLM calls of latency and cost per query in exchange for intent-appropriate retrieval",
+    "You want a LangChain-compatible drop-in retriever (the notebook wraps the router in a BaseRetriever subclass) so downstream chains stay unchanged"
+  ],
+  "tradeoffs": [
+    "Heavy per-query LLM overhead: one classification call, one or more query-rewrite/sub-query/viewpoint calls, then point-wise 1-10 relevance scoring of every candidate document (k*2 docs = 8+ scoring calls) - easily 10+ GPT-4o calls per question, with corresponding latency and cost",
+    "Silent misrouting: if the classifier picks the wrong category, the query gets a mismatched strategy with no fallback or confidence check",
+    "The four categories (Factual/Analytical/Opinion/Contextual) are hand-crafted; your domain's query taxonomy may differ, and adding categories means writing new strategy classes",
+    "As implemented, each strategy builds its own separate FAISS index over the same texts, quadrupling embedding and index-build cost - a production version should share one index",
+    "Point-wise LLM relevance scoring is noisy and slow compared to a trained cross-encoder reranker",
+    "Do not use when queries are homogeneous (e.g. all factual lookup) - a single tuned retriever plus a reranker is simpler, cheaper, and easier to evaluate",
+    "The notebook's Opinion strategy contains a latent bug (calls .split() on a structured-output list of ints), so treat the code as a pattern, not production-ready",
+    "Notebook demo corpus is a single sentence, so retrieval-quality claims are not empirically demonstrated"
+  ],
+  "how_it_works": "At query time an LLM classifier (GPT-4o with structured output via a Pydantic `categories_options` model) labels the query Factual, Analytical, Opinion, or Contextual. An `AdaptiveRetriever` dict-dispatches to one of four strategy classes, all inheriting from `BaseRetrievalStrategy`, which owns a FAISS vector store built from `CharacterTextSplitter(chunk_size=800)` chunks embedded with `OpenAIEmbeddings`. Factual: LLM rewrites the query for precision, similarity-search retrieves 2k candidates, then an LLM scores each doc 1-10 for relevance and the top k are kept. Analytical: LLM generates k sub-queries (structured `SubQueries` output), retrieves per sub-query, then an LLM picks a diverse-and-relevant subset by index (`SelectedIndices`). Opinion: LLM enumerates k distinct viewpoints, retrieves per viewpoint, then an LLM selects the most representative diverse opinions. Contextual: LLM reformulates the query with user_context, retrieves 2k, then ranks with a context-aware 1-10 scoring prompt. The router is wrapped in a `PydanticAdaptiveRetriever(BaseRetriever)` so it plugs into standard LangChain chains, and an `AdaptiveRAG` class feeds the selected docs into a grounded answer prompt ('if you don't know, say you don't know'). Though categorized under retrieval, the technique spans query-transformation (rewriting, sub-query decomposition, contextualization), post-retrieval (LLM reranking and diversity selection), and orchestration (classify-and-route control flow).",
+  "key_dependencies": [
+    "langchain (PromptTemplate, FAISS vectorstore wrapper, CharacterTextSplitter, BaseRetriever, Document)",
+    "langchain-openai (ChatOpenAI gpt-4o, OpenAIEmbeddings)",
+    "faiss-cpu (vector index)",
+    "langchain_core.pydantic_v1 (BaseModel/Field for structured LLM outputs)",
+    "python-dotenv (OPENAI_API_KEY loading)",
+    "repo-local helper_functions and evaluation.evalute_rag modules (wildcard-imported boilerplate)"
+  ],
+  "key_code_signals": [
+    "class QueryClassifier with chain = prompt | llm.with_structured_output(categories_options) returning Factual/Analytical/Opinion/Contextual",
+    "class BaseRetrievalStrategy: CharacterTextSplitter(chunk_size=800) -> FAISS.from_documents(docs, OpenAIEmbeddings())",
+    "FactualRetrievalStrategy: 'Enhance this factual query' rewrite, similarity_search(k*2), per-doc 1-10 scoring via with_structured_output(relevant_score)",
+    "AnalyticalRetrievalStrategy: SubQueries structured output -> per-sub-query similarity_search -> SelectedIndices diversity-selection prompt",
+    "OpinionRetrievalStrategy: 'Identify {k} distinct viewpoints' -> retrieve per viewpoint -> LLM selects diverse opinions by index",
+    "ContextualRetrievalStrategy.retrieve(query, k, user_context): context-aware query reformulation and context-aware ranking prompt",
+    "AdaptiveRetriever.get_relevant_documents: self.strategies[classifier.classify(query)].retrieve(query) dict dispatch",
+    "PydanticAdaptiveRetriever(BaseRetriever) wrapper making the router a drop-in LangChain retriever"
+  ],
+  "related_techniques": [
+    "query_transformations: composes - the Factual/Contextual strategies reuse query rewriting and the Analytical strategy reuses sub-query decomposition from that technique",
+    "reranking: alternative/composes - a cross-encoder or LLM reranker delivers the post-retrieval scoring step without the routing layer, or can replace the noisy point-wise 1-10 scoring here",
+    "self_rag: alternative - adapts at the whether-and-how-to-use-retrieval level with reflection, rather than routing among fixed retrieval strategies",
+    "crag (corrective RAG): alternative - adapts based on evaluated retrieval quality after the fact instead of predicted query type before retrieval",
+    "retrieval_with_feedback_loop: sibling - the repo's other 'Iterative and Adaptive' technique, adapting from user feedback over time rather than per-query intent",
+    "fusion_retrieval: composes - hybrid BM25+vector search could serve as the backend inside each strategy",
+    "hyde: alternative - a different query-side transformation for improving retrieval precision on a single strategy",
+    "multi_faceted_filtering: composes - metadata/similarity filtering could replace or augment the LLM diversity-selection step"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "adaptive retrieval",
+    "query routing",
+    "query classification",
+    "query intent",
+    "retrieval strategy selection",
+    "heterogeneous queries",
+    "factual vs analytical queries",
+    "sub-query decomposition",
+    "diverse retrieval",
+    "viewpoint diversity",
+    "personalized retrieval",
+    "user context",
+    "LLM reranking",
+    "relevance scoring",
+    "query rewriting",
+    "adaptive RAG",
+    "router",
+    "one-size-fits-all retrieval"
+  ],
+  "summary": "Adaptive retrieval fixes the problem that a single fixed retrieval configuration is a compromise across query types: precise top-k similarity search suits factual lookups but under-covers analytical questions, returns one-sided results for opinion questions, and ignores user context. A GPT-4o classifier with Pydantic structured output labels each query Factual, Analytical, Opinion, or Contextual, and a router dispatches it to a matching strategy over a FAISS index. The Factual strategy rewrites the query and LLM-scores each candidate 1-10; the Analytical strategy decomposes the query into sub-queries, retrieves per sub-query, and LLM-selects a diverse subset; the Opinion strategy enumerates distinct viewpoints and retrieves per viewpoint; the Contextual strategy folds user context into a reformulated query and context-aware ranking. A LangChain BaseRetriever wrapper makes it a drop-in retriever. Costs are real: roughly 10+ LLM calls per query (classification, rewriting, per-document scoring), silent misrouting risk, and hand-crafted categories that may not match your domain. Prefer it for mixed-intent workloads; skip it for homogeneous factual Q&A where a tuned retriever plus reranker is cheaper.",
+  "notes_for_chunking": "Well-structured notebook, easy to chunk. Cell 0 is a book advertisement (junk, strip). Cell 1 is a long, high-quality standalone overview in markdown (Overview/Motivation/Key Components/Method Details/Benefits/Conclusion) - it makes an excellent summary chunk by itself. Cell 2 is an SVG image reference (strip or keep as pointer). Cells 3-5 are pip install and git-clone boilerplate (strip). Cell 6 is the import block including wildcard imports from repo-local helper_functions (note: `List` comes from these wildcards, so code cells are not import-complete in isolation). From cell 7 onward the notebook alternates one short '###' markdown header per one code cell defining a single class - a clean header+code pairing ideal for one-chunk-per-class chunking. Strategy classes inherit from BaseRetrievalStrategy (cell 10), so chunks for strategy classes should carry the base-class context or a reference to it. Pydantic schema classes (relevant_score, SelectedIndices, SubQueries) are defined adjacent to their consuming strategy - keep them in the same chunk. No stored outputs or base64 blobs. Final cell is an analytics tracker image (strip). Markdown/code ratio is roughly 40/60 by cell count; headers are terse but accurate (some typos: 'Adapive', 'reriever').",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/adaptive_retrieval.json"
+}

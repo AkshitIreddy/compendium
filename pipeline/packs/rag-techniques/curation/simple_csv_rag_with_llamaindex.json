@@ -1,0 +1,78 @@
+{
+  "slug": "simple_csv_rag_with_llamaindex",
+  "title": "Simple CSV RAG with LlamaIndex (row-per-document ingestion)",
+  "one_liner": "Index a CSV by turning each row into a self-contained 'Column: value' document with LlamaIndex's PagedCSVReader, embed rows into FAISS, and answer lookup questions over tabular records with a standard query engine.",
+  "stage": "indexing",
+  "problem_solved": "Naive RAG pipelines treat a CSV as one long text blob: generic chunkers split rows mid-record, detach values from their column headers, and merge unrelated rows, so retrieval returns fragments like '229.077.5154' with no idea what field or record it belongs to. This technique makes each CSV row an atomic, self-describing retrieval unit so natural-language lookups over record-style tables (customers, products, tickets) retrieve complete, labeled records.",
+  "failure_modes": [
+    "My data is a CSV/spreadsheet and normal text chunking splits rows in the middle, so retrieved chunks are meaningless fragments",
+    "Retrieved values from my table come back without their column names, so the LLM can't tell a phone number from an ID",
+    "Questions about a specific record (a customer, a product) retrieve pieces of several different rows mixed together",
+    "I need a natural-language Q&A interface over structured record data without building a SQL layer",
+    "Answers about tabular data are hallucinated because the generator never sees the full matching record"
+  ],
+  "when_to_use": [
+    "Your corpus is one or more CSV files of independent records (customer lists, product catalogs, ticket exports) and queries are lookups about individual records",
+    "Each row is meaningful on its own once paired with its column headers — no cross-row context needed to answer",
+    "You want a working tabular Q&A baseline in ~30 lines using the LlamaIndex ecosystem rather than LangChain",
+    "Tables are small-to-medium (hundreds to low tens of thousands of rows) where per-row embedding cost and exact FAISS search are cheap",
+    "You already use LlamaIndex Settings/IngestionPipeline conventions and want CSV support that plugs into them via a file_extractor"
+  ],
+  "tradeoffs": [
+    "Retrieval-then-generate cannot do aggregation, counting, filtering, sorting, or cross-row analytics ('how many customers are in Chile?') — use text-to-SQL or a pandas/dataframe agent for those",
+    "One embedding call per row: cost and index size grow linearly with row count; very wide rows produce long documents that dilute embedding quality",
+    "faiss.IndexFlatL2 is exact brute-force search — fine for 100 rows, slow at millions; no ANN, no metadata filtering configured",
+    "Embeddings match text semantically, not numerically — queries over numeric ranges or dates ('subscribed after 2020') retrieve unreliably",
+    "similarity_top_k=2 hardcoded; multi-record questions silently miss rows beyond the top 2",
+    "In-memory FAISS store in the notebook is not persisted; index must be rebuilt each run",
+    "No cross-row or cross-table joins — a question spanning two tables cannot be answered"
+  ],
+  "how_it_works": "Global LlamaIndex Settings pin the LLM (OpenAI gpt-3.5-turbo) and embedding model (text-embedding-3-small truncated to 512 dimensions). A PagedCSVReader is registered as the .csv file_extractor for SimpleDirectoryReader; it converts every CSV row into its own Document whose text is a newline-separated list of 'Column Name: value' pairs (verified in the sample output: 'First Name: Sheryl / Company: Rasmussen Group / ...'). No further splitting is applied — the row IS the chunk, so this indexing choice doubles as the chunking strategy. A faiss.IndexFlatL2(512) wrapped in FaissVectorStore receives the embeddings via an IngestionPipeline(vector_store=..., documents=docs), whose output nodes build a VectorStoreIndex. as_query_engine(similarity_top_k=2) then embeds the user question, retrieves the 2 nearest row-documents by L2 distance, and has the LLM synthesize an answer (retrieval + generation stages use stock LlamaIndex components). Demonstrated on a 100-row dummy customer CSV with the query 'which company does Sheryl Baxter work for?' answered correctly as 'Rasmussen Group'.",
+  "key_dependencies": [
+    "llama-index (core: Settings, SimpleDirectoryReader, IngestionPipeline, VectorStoreIndex)",
+    "llama-index-readers-file (PagedCSVReader)",
+    "llama-index-vector-stores-faiss (FaissVectorStore)",
+    "llama-index-llms-openai / llama-index-embeddings-openai (OpenAI gpt-3.5-turbo, text-embedding-3-small)",
+    "faiss-cpu",
+    "pandas (preview only)",
+    "python-dotenv (API key loading)",
+    "OpenAI API"
+  ],
+  "key_code_signals": [
+    "PagedCSVReader() — one Document per CSV row, formatted as 'Column: value' lines",
+    "SimpleDirectoryReader(input_files=[file_path], file_extractor={'.csv': csv_reader})",
+    "faiss.IndexFlatL2(EMBED_DIMENSION) with EMBED_DIMENSION=512",
+    "FaissVectorStore(faiss_index=fais_index)",
+    "IngestionPipeline(vector_store=vector_store, documents=docs); nodes = pipeline.run()",
+    "VectorStoreIndex(nodes).as_query_engine(similarity_top_k=2)",
+    "Settings.embed_model = OpenAIEmbedding(model='text-embedding-3-small', dimensions=512)"
+  ],
+  "related_techniques": [
+    "simple_csv_rag: alternative — same row-wise CSV RAG implemented with LangChain instead of LlamaIndex",
+    "simple_rag: sibling baseline — the same minimal pipeline for unstructured text/PDF documents",
+    "json_rag: related — analogous baseline for structured JSON data instead of CSV",
+    "reranking: refinement — rerank retrieved rows when top-k L2 similarity is too coarse",
+    "query_transformations: refinement — rewrite vague user questions into record-lookup-shaped queries before retrieval",
+    "choose_chunk_size: alternative concern — irrelevant here because row-per-document replaces size-based chunking"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "csv rag",
+    "tabular data rag",
+    "spreadsheet question answering",
+    "llamaindex csv",
+    "PagedCSVReader",
+    "row-level chunking",
+    "structured data retrieval",
+    "faiss vector store",
+    "customer data Q&A",
+    "record lookup",
+    "table rag",
+    "one document per row",
+    "IngestionPipeline",
+    "openai embeddings"
+  ],
+  "summary": "Baseline RAG pipeline for tabular CSV data built on LlamaIndex. The core move is row-level ingestion: PagedCSVReader converts every CSV row into its own Document formatted as 'Column Name: value' lines, so each embedded unit is a complete, self-describing record — no text splitter can cut a row in half or strip its column headers. Rows are embedded with OpenAI text-embedding-3-small (512 dims) and stored in a FAISS IndexFlatL2 via FaissVectorStore and an IngestionPipeline; a VectorStoreIndex query engine (similarity_top_k=2) retrieves matching rows and gpt-3.5-turbo synthesizes the answer. Use it for natural-language lookup Q&A over record-style tables (customers, products, tickets) where each row is independently meaningful. It does not handle aggregation, counting, filtering, or cross-row analytics — those need text-to-SQL or a dataframe agent — and one embedding per row plus exact brute-force search gets expensive and slow on very large tables. Functionally equivalent to the LangChain simple_csv_rag notebook; a foundation to layer reranking or query transformations on.",
+  "notes_for_chunking": "Well-structured, short notebook (20 cells) with clean alternation of markdown headers and small code cells. Cell 0 is a promotional book advertisement (strip). Cell 1 is a dense, self-contained overview with '## Overview', '## Key Components', '## Method Details', '## Benefits', '## Conclusion' headers — the highest-value prose, chunkable as one unit. Cells 2-4: pip install (strip) and an imports+Settings cell that carries real signal (model choices, EMBED_DIMENSION). Cell 5 duplicates the CSV-description paragraph from cell 1 (dedupe). Cell 6 is a wget data-download cell that also fetches an unused climate-change PDF — junk, strip. Cells 8-18 are '### Header' + 1 short code cell pairs (Vector Store, Load CSV, Ingestion Pipeline, Create Query Engine, Query) — each pair is self-contained and maps 1:1 to a pipeline step; keep header+code together. Cell 12's output shows the exact row-document format — small but load-bearing, keep it. Final cell is a view-tracker image (strip). No base64 blobs or giant outputs.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/simple_csv_rag_with_llamaindex.json"
+}

@@ -1,0 +1,84 @@
+{
+  "slug": "graphrag_with_milvus_vectordb",
+  "title": "Graph RAG with Milvus Vector Database",
+  "one_liner": "Graph RAG built entirely on a vector database: embed entities and relationship triplets in separate Milvus collections, expand a subgraph via sparse adjacency-matrix multiplication, and LLM-rerank relationships to retrieve passages that answer multi-hop questions.",
+  "stage": "retrieval",
+  "problem_solved": "Naive similarity search retrieves passages that are semantically close to the query surface form but misses passages that are only logically connected through chains of entity relationships, so multi-hop questions (e.g. 'What contribution did the son of Euler's teacher make?') get wrong or 'I don't know' answers. This technique reconstructs graph-style multi-hop reasoning using only a vector database — no separate graph database — by retrieving entities and relationship triplets, expanding their graph neighborhood mathematically, and letting an LLM pick the relationships that bridge the reasoning chain.",
+  "failure_modes": [
+    "Questions that require chaining multiple facts (multi-hop reasoning) return wrong answers or 'I don't know' because no single chunk contains the full chain",
+    "The correct answer passage is semantically distant from the query wording, so embedding similarity never surfaces it",
+    "Relationships between entities are scattered across different documents and plain chunk retrieval never connects them",
+    "Queries about how entities relate to each other (family, org charts, citations, dependencies) fail with flat passage retrieval",
+    "You want graph-style reasoning but cannot justify operating a dedicated graph database alongside your vector store"
+  ],
+  "when_to_use": [
+    "Your users ask multi-hop questions whose answers require combining facts from multiple passages (genealogies, org structures, scientific lineages, legal/medical cross-references)",
+    "Your corpus is entity-rich and relationships between entities carry most of the answer-relevant signal",
+    "You already run Milvus (or another vector DB) and want graph-RAG behavior without adding Neo4j or another graph engine to your stack",
+    "You can build or already have a triplet-extraction step (NER + relation extraction, OpenIE, or LLM-based extraction) for your corpus",
+    "A measurable share of failures in your existing RAG are 'right entities, wrong passage' cases where the bridge fact was never retrieved"
+  ],
+  "tradeoffs": [
+    "Requires an offline entity/relationship triplet extraction pipeline for real corpora — the notebook hand-writes triplets and hardcodes the query NER result, so the hardest part is left as an exercise",
+    "One extra LLM call (gpt-4o with CoT prompt) per query for relationship reranking adds latency and cost on top of two extra vector searches",
+    "Three separate collections (entities, relations, passages) plus entity->relation and relation->passage adjacency dicts must be built, kept consistent, and persisted — the adjacency maps live in application memory, not in Milvus",
+    "The adjacency matrix is first built dense (numpy zeros of size entities x relations) before sparsification, which won't scale as written; production needs sparse construction from the start",
+    "Subgraph expansion on dense graphs can explode the candidate set; degree > 2 is rarely useful and inflates the rerank prompt",
+    "Query-time NER is required for the entity retrieval path; poor NER degrades one of the two retrieval paths",
+    "Overkill for single-hop factoid QA over homogeneous text — naive passage retrieval is cheaper and often sufficient",
+    "Notebook as written targets managed Zilliz Cloud (uri + token); self-hosting Milvus adds ops burden"
+  ],
+  "how_it_works": "Offline (indexing): each document contributes a passage plus a list of [subject, predicate, object] triplets. Unique subjects/objects become the entity list; each triplet is concatenated into a natural-language sentence to form the relation list. Two adjacency dicts are built: entityid_2_relationids and relationid_2_passageids. All three lists are embedded with text-embedding-3-small and inserted into three Milvus collections (entity_collection, relation_collection, passage_collection). Query time (retrieval): NER-extracted query entities are embedded and searched against the entity collection, while the full query embedding searches the relation collection — a dual-path retrieval. A scipy csr_matrix entity-relation adjacency matrix is built; matrix products (A@A.T and its powers) give n-degree entity-entity and relation-relation adjacency, so retrieved entity/relation hits are expanded to their n-hop neighborhood by reading nonzero columns, and the two candidate sets are unioned. Post-retrieval: a gpt-4o chain-of-thought reranker (one-shot example, JSON-mode output via llm.bind(response_format={'type':'json_object'}) and JsonOutputParser) selects the most useful relationships; relationid_2_passageids maps them back to deduplicated passages, and the top-k passages feed a standard answer-generation prompt. The notebook contrasts this against a naive-RAG baseline (direct passage search), which fails the multi-hop demo question while the graph method answers correctly.",
+  "key_dependencies": [
+    "pymilvus (MilvusClient; Zilliz Cloud managed Milvus in the notebook)",
+    "langchain-openai (ChatOpenAI gpt-4o, OpenAIEmbeddings text-embedding-3-small)",
+    "langchain-core (ChatPromptTemplate, JsonOutputParser, StrOutputParser, messages)",
+    "scipy (sparse csr_matrix for adjacency math)",
+    "numpy",
+    "tqdm",
+    "OpenAI API key"
+  ],
+  "key_code_signals": [
+    "MilvusClient(uri=..., token=...) with three collections: entity_collection, relation_collection, passage_collection",
+    "relation = \" \".join(triplet) — triplets stored as concatenated natural-language sentences for embedding",
+    "entityid_2_relationids / relationid_2_passageids defaultdict adjacency mappings built during ingestion",
+    "csr_matrix(entity_relation_adj); entity_adj_1_degree = entity_relation_adj @ entity_relation_adj.T — graph expansion via sparse matrix powers (target_degree loop)",
+    "Dual-path search: milvus_client.search on entity_collection with NER-entity embeddings and on relation_collection with the full-query embedding",
+    "expanded_relations_from_relation | expanded_relations_from_entity — union merge of both expansion paths",
+    "rerank_relations(): one-shot CoT prompt + llm.bind(response_format={\"type\": \"json_object\"}) | JsonOutputParser() to pick useful relationships",
+    "query_ner_list = [\"Euler\"] — hardcoded NER placeholder the practitioner must replace"
+  ],
+  "related_techniques": [
+    "graph_rag: alternative (LangChain/graph-DB-backed Graph RAG vs this vector-DB-only approach)",
+    "Microsoft_GraphRag: alternative (community-summary GraphRAG framework; heavier indexing)",
+    "graph_rag_local_attribution: alternative (local NetworkX + Ollama Graph RAG with sentence-level attribution)",
+    "reranking: composes (the LLM relationship-reranking stage is a specialized rerank step)",
+    "hyde_hypothetical_document_embedding: alternative (bridges query-passage semantic gaps by rewriting the query instead of traversing relationships)",
+    "raptor: alternative (hierarchical summarization for corpus-level reasoning rather than entity-relation traversal)",
+    "simple_rag: baseline (the notebook's naive passage-collection search is exactly this baseline)"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "graph rag",
+    "multi-hop question answering",
+    "knowledge graph",
+    "triplets",
+    "subject predicate object",
+    "milvus",
+    "zilliz",
+    "vector database only graph",
+    "entity retrieval",
+    "relationship retrieval",
+    "subgraph expansion",
+    "adjacency matrix",
+    "sparse matrix",
+    "LLM reranking",
+    "chain of thought rerank",
+    "NER query entities",
+    "multi-hop retrieval failure",
+    "no graph database"
+  ],
+  "summary": "Implements Graph RAG using only a vector database (Milvus/Zilliz Cloud), eliminating the separate graph DB. Offline, the corpus is decomposed into passages plus subject-predicate-object triplets; entities and concatenated triplet sentences are embedded (text-embedding-3-small) into three Milvus collections — entities, relations, passages — with adjacency dicts mapping entities to relations and relations to passages. At query time, NER-extracted query entities search the entity collection while the full query embedding searches the relation collection (dual-path retrieval). Hits are expanded to their n-hop graph neighborhood via sparse adjacency-matrix multiplication (scipy csr_matrix, matrix powers), and both candidate sets are merged. A gpt-4o reranker with a one-shot chain-of-thought prompt and JSON output selects the relationships most useful for the question; their source passages become the final context. On the demo multi-hop query ('What contribution did the son of Euler's teacher make?'), naive passage similarity retrieves the wrong passages and answers 'I don't know', while this method traces Euler to Johann to Daniel Bernoulli and answers correctly. Real costs: triplet extraction and query NER pipelines, one extra LLM call per query, and three collections plus in-memory adjacency structures.",
+  "notes_for_chunking": "Well-structured tutorial notebook, roughly 50/50 markdown/code with high-quality headers: ## Overview, ## Technical Implementation, ## Offline Data Loading, ## Online Querying, and ### subsections (Similarity Retrieval, Expand Subgraph, LLM Reranking, Get Final Results). Each code cell is preceded by a rich explanatory markdown cell, so (concept-markdown + code) pairs are largely self-contained chunk units. Junk to strip: cell 0 is a book advertisement, cell 41 is a Zilliz Cloud sales pitch, cell 42 is a tracking-pixel image, plus the pip-install cell and the OPENAI_API_KEY placeholder cell. Image references (../images/graph_rag_with_milvus_*.png, zilliz_*.png) won't resolve outside the repo. Cell 13 is a long nano_dataset literal (4 passages + triplets) — useful as schema illustration but truncatable. Outputs are small and textual; the final naive-vs-graph comparison output (cell 39) is high-value evidence and worth keeping. The one-shot rerank prompt strings (cell 29) are load-bearing implementation detail, not boilerplate.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/graphrag_with_milvus_vectordb.json"
+}

@@ -1,0 +1,75 @@
+{
+  "slug": "choose_chunk_size",
+  "title": "Optimizing Chunk Sizes (Empirical Chunk-Size Selection)",
+  "one_liner": "Pick the best fixed chunk size for your corpus by benchmarking faithfulness, relevancy, and response latency across candidate sizes on auto-generated eval questions.",
+  "stage": "chunking",
+  "problem_solved": "Chunk size is one of the highest-impact RAG hyperparameters, yet most pipelines pick it by guesswork or framework defaults. Too small and retrieved chunks lack the surrounding context needed to answer; too large and retrieved context is diluted with irrelevant text, hurting groundedness and inflating latency. This notebook replaces guesswork with a data-driven experiment: it measures how different fixed chunk sizes actually perform on questions generated from your own documents, so you commit to an index configuration backed by numbers rather than intuition.",
+  "failure_modes": [
+    "Retrieved chunks are too small and are missing the surrounding context needed to answer questions correctly",
+    "Chunks are too large, so retrieved context is mostly irrelevant text that dilutes answers and encourages hallucination",
+    "RAG answers are slow because oversized chunks inflate prompt length and generation latency",
+    "Chunk size was chosen by default or gut feeling and you have no evidence it fits your corpus",
+    "Answer quality changed unpredictably after switching corpora, embedding model, or LLM and you suspect chunking is the cause"
+  ],
+  "when_to_use": [
+    "You are setting up a new RAG pipeline and must choose chunk_size and chunk_overlap before committing to an index build",
+    "You use plain fixed-size chunking and want to tune it before reaching for more complex strategies like semantic or proposition chunking",
+    "You have no labeled QA dataset - the notebook auto-generates evaluation questions directly from your documents",
+    "Quality or latency regressed after changing corpus, embedding model, or LLM and you want to isolate whether chunk size is the culprit",
+    "You want to rule out a simple hyperparameter problem before adopting heavier retrieval fixes (reranking, query rewriting, etc.)"
+  ],
+  "tradeoffs": [
+    "Expensive offline experiment: each candidate chunk size requires a full index rebuild plus, per question, one generation call (GPT-3.5-turbo) and two GPT-4o judge calls; cost scales as (#sizes x #questions x ~3 LLM calls) plus the question-generation pass",
+    "LLM-as-judge binary pass/fail metrics are noisy; with a small sample (25 questions) sizes may tie - the notebook's own run shows 1.00 faithfulness/relevancy for both 128 and 256, providing no discrimination",
+    "Only tunes a single global fixed size; if your documents are heterogeneous (mixed tables, prose, code), no fixed size may be good and content-aware chunking (semantic/proposition) is a better fit",
+    "Auto-generated questions are biased toward facts the corpus states directly and may not match your real user query distribution",
+    "It is a one-off tuning procedure, not a runtime component - results go stale and the experiment must be rerun whenever the corpus, embedder, or LLM changes"
+  ],
+  "how_it_works": "The technique operates at the chunking stage but its mechanism is an evaluation harness. (1) Load documents with LlamaIndex SimpleDirectoryReader. (2) Use DatasetGenerator.from_documents on the first 20 documents to auto-generate evaluation questions, then randomly sample 25 of them - no hand-labeled data needed. (3) Define two GPT-4o-based judges: a FaithfulnessEvaluator whose prompt is replaced (via update_prompts) with a stricter few-shot template that answers YES only if the retrieved context explicitly supports the response, and a stock RelevancyEvaluator. (4) For each candidate chunk size (128 and 256 in the notebook), set Settings.chunk_size and Settings.chunk_overlap = chunk_size // 5, rebuild a VectorStoreIndex from the same documents, and create a query engine with similarity_top_k=5. (5) Answer every eval question with GPT-3.5-turbo, wall-clock timing each query, and score each response with both judges. (6) Report average response time, average faithfulness, and average relevancy per chunk size, and pick the size with the best quality/latency balance. The loop is deliberately sequential (instead of BatchEvalRunner) so per-size response time can be measured.",
+  "key_dependencies": [
+    "llama-index (core: VectorStoreIndex, SimpleDirectoryReader, Settings, PromptTemplate)",
+    "llama-index evaluation module (DatasetGenerator, FaithfulnessEvaluator, RelevancyEvaluator)",
+    "llama-index-llms-openai (OpenAI wrapper for gpt-3.5-turbo and gpt-4o)",
+    "openai",
+    "python-dotenv",
+    "nest_asyncio"
+  ],
+  "key_code_signals": [
+    "DatasetGenerator.from_documents(eval_documents).generate_questions_from_nodes() - synthetic eval questions from the corpus itself",
+    "FaithfulnessEvaluator with a custom few-shot PromptTemplate installed via update_prompts, forcing YES/NO judgments grounded strictly in retrieved context",
+    "RelevancyEvaluator() judged by GPT-4o (Settings.llm = gpt4)",
+    "Settings.chunk_size = chunk_size; Settings.chunk_overlap = chunk_size // 5 - the swept hyperparameters",
+    "VectorStoreIndex.from_documents(eval_documents) rebuilt inside the loop for every candidate size",
+    "vector_index.as_query_engine(similarity_top_k=5) with time.time() wall-clock timing per query",
+    "for chunk_size in chunk_sizes: [128, 256] - the sweep loop printing avg response time / faithfulness / relevancy"
+  ],
+  "related_techniques": [
+    "simple_rag: refines - tunes the core chunking hyperparameter of the basic RAG pipeline",
+    "semantic_chunking: alternative - content-aware boundaries instead of a tuned global fixed size",
+    "proposition_chunking: alternative - atomic self-contained fact chunks instead of fixed-size chunks",
+    "context_enrichment_window_around_chunk: complement - small tuned chunks plus retrieval-time window expansion instead of simply enlarging chunks",
+    "relevant_segment_extraction: alternative - dynamically sized multi-chunk segments at query time instead of one fixed size",
+    "retrieval_with_feedback_loop / evaluation notebooks: shares mechanism - same LLM-as-judge faithfulness/relevancy evaluation pattern"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "chunk size",
+    "chunk overlap",
+    "optimal chunk size",
+    "chunking strategy",
+    "tune chunk size",
+    "fixed-size chunking",
+    "llama-index Settings.chunk_size",
+    "faithfulness evaluation",
+    "relevancy evaluation",
+    "LLM as judge",
+    "synthetic eval questions",
+    "DatasetGenerator",
+    "response latency",
+    "RAG hyperparameter tuning",
+    "index configuration"
+  ],
+  "summary": "Chunk size drives a core RAG tradeoff: small chunks embed precisely but lose surrounding context, while large chunks preserve context but dilute retrieval relevance, invite hallucination, and slow generation. This technique replaces guesswork with an empirical sweep. Using LlamaIndex, it auto-generates ~25 evaluation questions from your own documents via DatasetGenerator (no labeled data required), then for each candidate chunk size (e.g., 128, 256; overlap = size/5) rebuilds a VectorStoreIndex, answers every question with GPT-3.5-turbo at top_k=5, and scores each response with GPT-4o judges: a FaithfulnessEvaluator with a customized strict few-shot prompt (response must be explicitly supported by retrieved context) and a RelevancyEvaluator, while wall-clock timing each query. Averaged faithfulness, relevancy, and response time per size reveal the best quality/latency balance for your corpus. Costs are real - one index rebuild plus roughly three LLM calls per question per size - and binary judge metrics can tie on small samples, but it is the cheapest way to ground the most consequential chunking decision in evidence before building anything fancier.",
+  "notes_for_chunking": "Short notebook (~15 cells) with clean structure. Markdown cells are terse '###' step headers (Read Docs; Create evaluation questions; Define metrics evaluators; Function to evaluate metrics for each chunk size; Test different chunk sizes) that map one-to-one onto the following code cell - ideal header+code pairing for a chunker. Code dominates; markdown is minimal, so headers alone carry little semantic content and should be fused with their code cells. The core of the technique is one long self-contained function cell (evaluate_response_time_and_accuracy) - keep it intact as a single chunk. The evaluator-definition cell embeds a long few-shot faithfulness PromptTemplate string; keep prompt and evaluator setup together. Junk to strip: the promotional book-banner markdown cell at the top, the pip-install cell, a trailing tracking-pixel image markdown cell, and a DeprecationWarning in the output of the final cell. Outputs are tiny (two printed metric lines) and worth keeping as they show the technique's expected output format.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/choose_chunk_size.json"
+}

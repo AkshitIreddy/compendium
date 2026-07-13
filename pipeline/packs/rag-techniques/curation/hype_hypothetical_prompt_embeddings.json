@@ -1,0 +1,79 @@
+{
+  "slug": "hype_hypothetical_prompt_embeddings",
+  "title": "HyPE (Hypothetical Prompt Embeddings)",
+  "one_liner": "At indexing time, generate multiple hypothetical questions per chunk and embed those questions (pointing back to the chunk), turning retrieval into question-to-question matching with zero extra query-time cost.",
+  "stage": "indexing",
+  "problem_solved": "Query-document style mismatch: short, conversational user questions embed far from long declarative document passages, so the right chunk ranks low. Runtime fixes like HyDE or query rewriting close this gap but add an LLM call and latency to every single query. HyPE moves the hypothetical generation offline: each chunk is represented in the vector store by embeddings of LLM-generated 'essential questions' it can answer, so an incoming user question matches stored questions (same style, same length distribution) instead of raw prose, at standard-RAG query speed.",
+  "failure_modes": [
+    "Users ask short conversational questions but my documents are long formal prose, and the embeddings just don't line up — the correct passage ranks below irrelevant ones",
+    "The chunk that actually answers the question is in the index but never comes back in top-k (question-vs-answer vocabulary and style mismatch)",
+    "HyDE or query rewriting improved my retrieval but made every query slower and more expensive — I need the same benefit without per-query LLM calls",
+    "A single chunk covers several distinct facts/topics and its one embedding can't surface it for all the different questions it could answer",
+    "Retrieval precision/recall is low even though chunking and the embedding model seem reasonable"
+  ],
+  "when_to_use": [
+    "High query volume or latency-sensitive serving where per-query LLM calls (HyDE, multi-query rewriting) are too slow or costly — HyPE shifts all that cost to index build",
+    "Corpus is static or updated infrequently, so the one-time LLM cost per chunk amortizes over many queries",
+    "End users phrase queries as natural-language questions while the corpus is formal/technical prose (reports, textbooks, documentation, policies)",
+    "You want multi-vector coverage per chunk (each chunk indexed once per generated question) to increase the chance dense retrieval surfaces it",
+    "You can afford larger chunks: the notebook notes chunk size can be generous because precision comes from the question vectors, not the chunk embedding itself"
+  ],
+  "tradeoffs": [
+    "Index build cost: one chat-LLM call per chunk plus one embedding call per generated question — expensive and slow for large corpora (mitigated in the notebook with ThreadPoolExecutor parallelism)",
+    "Index size grows several-fold (one vector per question, each duplicating the full chunk text as payload in the docstore), increasing memory/storage",
+    "Retrieval returns duplicate chunks when multiple question vectors of the same chunk match; you must deduplicate (notebook does list(set(context)))",
+    "Recall depends on the LLM generating exhaustive questions per chunk — sparse or unusual query intents the LLM didn't anticipate are missed; question-parsing from LLM output is brittle with smaller models (regex cleanup recommended)",
+    "Poor fit for rapidly changing corpora: every document update requires regenerating questions and re-embedding",
+    "Don't use it if your retrieval failure is elsewhere: keyword-style queries (BM25/hybrid may suffice), multi-hop reasoning, missing surrounding context, or generation-side hallucination"
+  ],
+  "how_it_works": "Pipeline (all enrichment happens at the indexing stage; query time is vanilla dense retrieval): (1) Load PDF with PyPDFLoader and split with RecursiveCharacterTextSplitter (chunk_size=1000, chunk_overlap=200). (2) For each chunk, generate_hypothetical_prompt_embeddings() runs an LCEL chain (PromptTemplate | ChatOpenAI(gpt-4o-mini, temperature=0) | StrOutputParser) with a prompt asking for 'essential questions that, when answered, capture the main points of the text', one per line; the response is split on newlines and each question is embedded with OpenAIEmbeddings(text-embedding-3-small) via embed_documents. (3) prepare_vector_store() parallelizes this across chunks with ThreadPoolExecutor/as_completed, lazily initializes a FAISS store (faiss.IndexFlatL2 sized from the first vector, InMemoryDocstore), and inserts each chunk MULTIPLE times via vector_store.add_embeddings([(chunk.page_content, vec) for vec in vectors]) — the stored vector is the question embedding but the stored text is the original chunk. (4) Query time: standard as_retriever(k=3) similarity search — the user query embeds once and matches precomputed question vectors (question-question matching); retrieved contexts are deduplicated with list(set(context)). This is the index-time mirror of HyDE (which generates a hypothetical answer per query at runtime); it also touches the retrieval stage (multi-vector matching) but requires no query-time transformation. Authors report up to +42pp retrieval precision and +45pp claim recall (SSRN preprint 5139335). Note: the notebook's FAISS(...) constructor call in prepare_vector_store is missing a comma after the index= argument as printed — trivially fixable but the cell as-shown would not parse.",
+  "key_dependencies": [
+    "langchain-community (FAISS vector store, InMemoryDocstore, PyPDFLoader)",
+    "langchain / langchain-openai (ChatOpenAI, OpenAIEmbeddings, PromptTemplate, StrOutputParser — pulled in via the repo's helper_functions wildcard import)",
+    "faiss-cpu (IndexFlatL2)",
+    "OpenAI API (gpt-4o-mini for question generation, text-embedding-3-small for embeddings)",
+    "concurrent.futures ThreadPoolExecutor (parallel index build)",
+    "tqdm, python-dotenv",
+    "repo-local helper_functions.py and evaluation/evalute_rag.py (replace_t_with_space, retrieve_context_per_question, show_context, evaluate_rag)"
+  ],
+  "key_code_signals": [
+    "generate_hypothetical_prompt_embeddings(chunk_text) — per-chunk LLM question generation returning (chunk_text, question_embeddings)",
+    "PromptTemplate 'generate essential questions that, when answered, capture the main points of the text' | ChatOpenAI | StrOutputParser",
+    "embedding_model.embed_documents(questions) — embedding the generated questions, not the chunk",
+    "vector_store.add_embeddings([(chunk.page_content, vec) for vec in vectors]) — same chunk inserted once per question vector (multi-vector index)",
+    "FAISS(embedding_function=..., index=faiss.IndexFlatL2(len(vectors[0])), docstore=InMemoryDocstore(), index_to_docstore_id={}) — manual store construction with precomputed vectors",
+    "ThreadPoolExecutor / as_completed + tqdm — parallelized index build over 97 chunks",
+    "context = list(set(context)) — dedup of repeated chunks after retrieval",
+    "chunks_vector_store.as_retriever(search_kwargs={'k': 3}) — plain retrieval, no query-time LLM"
+  ],
+  "related_techniques": [
+    "HyDe_Hypothetical_Document_Embedding: alternative — HyDE generates a hypothetical answer per query at runtime; HyPE precomputes hypothetical questions at index time, trading index cost for zero query-time overhead",
+    "query_transformations: alternative — runtime query rewriting/expansion attacks the same mismatch from the query side",
+    "document_augmentation: refines/sibling — that technique also augments documents with generated questions; HyPE specifically indexes the question embeddings as chunk proxies",
+    "reranking: composes-with — notebook explicitly says HyPE is compatible with rerankers on top of retrieved chunks",
+    "choose_chunk_size: composes-with — chunk size can be larger under HyPE since question vectors carry the precision",
+    "proposition_chunking: sibling — another index-time LLM transformation of chunk representation",
+    "contextual_chunk_headers: sibling — alternative index-time enrichment of chunk representations"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "HyPE",
+    "hypothetical prompt embeddings",
+    "hypothetical questions",
+    "query-document mismatch",
+    "question-question matching",
+    "HyDE alternative",
+    "precomputed query expansion",
+    "offline query expansion",
+    "multi-vector chunk representation",
+    "index-time question generation",
+    "embedding alignment",
+    "reduce query latency",
+    "FAISS add_embeddings",
+    "retrieval precision",
+    "question generation indexing"
+  ],
+  "summary": "HyPE (Hypothetical Prompt Embeddings) fixes query-document style mismatch in dense retrieval by moving hypothetical generation from query time to indexing time. Instead of embedding raw chunks, an LLM (gpt-4o-mini) generates several 'essential questions' per chunk during index build; each question is embedded (text-embedding-3-small) and stored in FAISS with the original chunk text as payload, giving every chunk multiple question-shaped vectors. Retrieval becomes question-to-question matching: the user query is embedded once and matched against precomputed hypothetical questions — zero extra LLM calls or latency at query time, unlike HyDE or query rewriting. The notebook chunks a PDF with RecursiveCharacterTextSplitter (1000/200), parallelizes question generation with ThreadPoolExecutor, inserts (chunk_text, question_vector) pairs via add_embeddings into an IndexFlatL2 store, and deduplicates retrieved chunks. Costs: one LLM call per chunk plus per-question embedding calls, a several-fold larger index, and full regeneration when documents change. Best for high-query-volume systems over stable corpora where conversational questions fail to match declarative prose; authors report up to +42pp context precision and +45pp claim recall.",
+  "notes_for_chunking": "Structure: 24 cells, roughly balanced markdown/code with a strict alternating 'markdown explainer -> code cell' rhythm after the intro. Cell 0 is a promotional book ad — strip. Cell 1 is a long, well-headed intro (## Overview, ## Method Details, ## Key Features, ## Evaluation, ## Conclusion) that is highly self-contained; split it by ## headers or keep as one dense chunk; it ends with an <img> tag to strip. Headers elsewhere are H3 ('### Define ...', '### Create ...', '### Test retriever', '### Evaluate results') and accurately describe the following code cell — markdown+next-code-cell pairing works very well here. Junk to strip: pip install cell (cell 3), git clone + sys.path cell (cell 4), duplicated wget download lines (cell 7), tqdm progress output, a long retrieved-context text output (cell 20), a large noisy evaluation output of JSON score strings (cell 22), and a trailing tracker-pixel image cell (cell 23). Beware 'from helper_functions import *' (cell 5): ChatOpenAI, OpenAIEmbeddings, FAISS, PyPDFLoader, PromptTemplate, StrOutputParser are used without visible imports — a chunker attributing imports must know they come from the repo helper module. Also note cell 12's FAISS(...) call is missing a comma after the index= argument (latent syntax error), so don't treat code cells as guaranteed-runnable.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/hype_hypothetical_prompt_embeddings.json"
+}

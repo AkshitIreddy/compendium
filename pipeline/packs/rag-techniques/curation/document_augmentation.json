@@ -1,0 +1,79 @@
+{
+  "slug": "document_augmentation",
+  "title": "Document Augmentation via Question Generation",
+  "one_liner": "Enrich the vector index at build time by generating synthetic questions for each document/fragment with an LLM, so user queries match question-shaped vectors instead of only declarative prose.",
+  "stage": "indexing",
+  "problem_solved": "Embedding similarity between a short interrogative user query and long declarative document text is often weak (question-vs-statement style mismatch), so the right chunk ranks poorly. This technique closes that gap by indexing LLM-generated questions alongside the original fragments: a user question now matches a semantically near-identical synthetic question, which carries metadata pointing back to its full parent document for answer generation.",
+  "failure_modes": [
+    "Users phrase queries as questions but the corpus is declarative prose, so vector search misses relevant sections (query/corpus vocabulary and style mismatch)",
+    "The right chunk exists but ranks below irrelevant chunks because its wording shares few terms or embedding-space features with the query",
+    "Small chunks retrieve precisely but lack surrounding context needed for the LLM to answer (mitigated here by storing the full parent document in each vector's metadata)",
+    "One document section must be findable from many differently-phrased user questions, but a single embedding per chunk can only be close to a few of them"
+  ],
+  "when_to_use": [
+    "Your users ask natural-language questions against a corpus of explanatory or report-style prose (FAQs, manuals, policy docs, textbooks)",
+    "Retrieval evaluation shows the answer-bearing chunk exists but is not in the top-k for question-form queries",
+    "The corpus is small-to-medium and mostly static, so a one-time LLM augmentation pass at index build is affordable",
+    "You can anticipate the space of user questions well enough that generated questions will cover real query phrasings",
+    "You want a retrieve-small/read-big pattern: match on a tiny fragment or question, answer from the full parent document"
+  ],
+  "tradeoffs": [
+    "Index build cost: one LLM call per document (or per fragment at FRAGMENT_LEVEL) generating up to 40 questions each — cost and build time scale linearly with corpus size",
+    "Index size balloons: ~40 extra vectors per document plus all original fragments, increasing embedding cost, storage, and potential retrieval noise from redundant/generic questions",
+    "Question quality is unvalidated: generic or hallucination-adjacent questions can match unrelated queries and route to the wrong parent document",
+    "Stale on update: any document edit requires regenerating its questions and re-embedding; poor fit for frequently changing corpora",
+    "Notebook implementation is fragile: k=1 retrieval leaves no room for a bad top hit, and chunking uses a crude regex word tokenizer rather than real token counts",
+    "Not needed when queries already share the corpus's phrasing (e.g., keyword-heavy technical lookup) or when a query-side fix like HyDE/query rewriting is cheaper than augmenting a huge index"
+  ],
+  "how_it_works": "A PDF is read to a string (read_pdf_to_string helper) and split twice with a regex word-tokenizer: first into large 'text documents' (DOCUMENT_MAX_TOKENS=4000, overlap 100) for answer context, then each into small 'fragments' (FRAGMENT_MAX_TOKENS=128, overlap 16) for retrieval. For each document (or each fragment, controlled by a QuestionGeneration enum), ChatOpenAI (gpt-4o-mini, temperature 0) with structured output (a pydantic QuestionList) generates at least QUESTIONS_PER_DOCUMENT=40 candidate questions, which are cleaned (numbered prefixes stripped, must end in '?') and deduplicated. Both original fragments (metadata type ORIGINAL) and generated questions (type AUGMENTED) become LangChain Documents whose metadata['text'] holds the full parent document. All are embedded with OpenAIEmbeddings into a FAISS store; a retriever with k=1 finds the nearest vector — usually an augmented question — and the answer LLM is prompted with the parent document from metadata rather than the matched snippet. The technique operates primarily at indexing time but implies a post-retrieval step (parent-document lookup) and a generation step (answer from parent context).",
+  "key_dependencies": [
+    "langchain (Document, FAISS vectorstore, PromptTemplate)",
+    "langchain-openai (ChatOpenAI, OpenAIEmbeddings)",
+    "faiss-cpu",
+    "pydantic (BaseModel/Field for structured question output)",
+    "PyPDF2 via repo helper_functions.read_pdf_to_string",
+    "python-dotenv (OPENAI_API_KEY loading)",
+    "OpenAI API (gpt-4o-mini for question generation and answering; text embeddings)"
+  ],
+  "key_code_signals": [
+    "class QuestionGeneration(Enum): DOCUMENT_LEVEL / FRAGMENT_LEVEL — switch for augmentation granularity",
+    "QUESTIONS_PER_DOCUMENT = 40 with DOCUMENT_MAX_TOKENS=4000 / FRAGMENT_MAX_TOKENS=128 two-level split",
+    "chain = prompt | llm.with_structured_output(QuestionList) inside generate_questions(text)",
+    "Document(page_content=question, metadata={'type': 'AUGMENTED', 'text': text_document}) — questions indexed as first-class vectors carrying parent text",
+    "FAISS.from_documents(documents, embedding_model) over mixed ORIGINAL + AUGMENTED docs",
+    "vectorstore.as_retriever(search_kwargs={'k': 1}) — single nearest neighbor retrieval",
+    "context = doc.metadata['text'] then generate_answer(context, query) — answer from parent document, not the matched vector's text",
+    "clean_and_filter_questions: regex-strip numbering, keep only strings ending with '?'"
+  ],
+  "related_techniques": [
+    "HyDE (hyde_hypothetical_document_embedding): alternative — mirror-image approach that generates a hypothetical document for the query at search time instead of questions for documents at index time",
+    "HyPE (HyPE_Hypothetical_Prompt_Embeddings): refines — same hypothetical-question idea, formalized as replacing chunk embeddings with question embeddings at index time",
+    "query_transformations: alternative — fixes query/corpus mismatch on the query side with rewriting/step-back/decomposition, no index rebuild needed",
+    "context_enrichment_window_around_chunk: composes — both use retrieve-small/read-big; window enrichment expands context after retrieval instead of storing parent text in metadata",
+    "hierarchical_indices: related — shares the two-level document/fragment structure for retrieval vs context",
+    "proposition_chunking: alternative — augments the index with LLM-derived atomic propositions instead of synthetic questions",
+    "contextual_chunk_headers: composes — another index-time augmentation that prepends context to chunks; can be combined with question generation",
+    "reranking: composes — mitigates this notebook's fragile k=1 retrieval by retrieving more candidates and reranking"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "document augmentation",
+    "question generation",
+    "synthetic questions",
+    "doc2query",
+    "index-time augmentation",
+    "query-document mismatch",
+    "vocabulary mismatch",
+    "question answering retrieval",
+    "FAISS",
+    "parent document retrieval",
+    "hypothetical questions",
+    "embedding asymmetry",
+    "improve recall vector search",
+    "chunk enrichment",
+    "gpt-4o-mini question generation"
+  ],
+  "summary": "Index-time document augmentation that attacks the question-vs-prose embedding mismatch in RAG: user queries are questions, but corpus chunks are declarative text, so nearest-neighbor search often misses the answer-bearing section. The notebook splits a PDF into large context documents (4000 tokens) and small retrieval fragments (128 tokens), then uses gpt-4o-mini with pydantic structured output to generate ~40 answerable questions per document (or per fragment). Generated questions are cleaned, deduplicated, and indexed in FAISS as first-class vectors alongside original fragments, each tagged AUGMENTED and carrying the full parent document in metadata. At query time the top hit is usually a synthetic question nearly identical to the user's; the pipeline then answers from the parent document stored in that hit's metadata (retrieve-small, read-big). Costs: one LLM call per document at build, ~40x more vectors, staleness on document updates, and unvalidated question quality. Best for static, question-driven corpora (FAQs, manuals, reports) where recall failures come from phrasing mismatch; query-side alternatives are HyDE or query rewriting, and HyPE is the closest sibling technique.",
+  "notes_for_chunking": "Cell 0 is a book-promo markdown cell — strip entirely. Cell 1 is a single large, fully self-contained overview markdown cell with good ## headers (Overview, Motivation, Prerequisites, Key Components, Method Details, Benefits, Implementation Details, Conclusion, Note on API Usage) — ideal standalone chunk material; split on ## if too long. After cell 1 the markdown/code ratio drops sharply: remaining markdown cells are thin one-line section headers ('### Define classes and functions', '### Example usage', '### Main pipeline', '### Example'). Code is concentrated in three cells: config/imports (cell 5, includes the QuestionGeneration enum and tunable constants — keep with its constants), a large definitions cell (cell 7, five functions + two classes with good docstrings — could be split per function but docstrings make each self-contained), and process_documents (cell 11, the core pipeline — keep atomic). Strip: pip install cell, git-clone/sys.path Colab boilerplate cell, duplicated wget download cell, and the final tracking-pixel markdown cell. Wildcard 'from helper_functions import *' hides where read_pdf_to_string, PromptTemplate, BaseModel, and Field come from — note this when extracting code chunks. This notebook copy has no stored outputs, so no output stripping needed.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/document_augmentation.json"
+}

@@ -1,0 +1,79 @@
+{
+  "slug": "multi_model_rag_with_colpali",
+  "title": "Multi-modal RAG with ColPali (Vision-Based Page-Image Retrieval)",
+  "one_liner": "Skip PDF parsing entirely: index every PDF page as an image with the ColPali vision late-interaction retriever, fetch the most relevant page image for a query, and have a vision LLM (Gemini) read the page and answer.",
+  "stage": "retrieval",
+  "problem_solved": "Text-only RAG pipelines lose or corrupt the information in visually rich PDFs: extraction/OCR mangles tables, drops figures and charts, and destroys layout, so questions whose answers live in visual elements get wrong or empty retrievals. This technique treats each page as an image, retrieves pages by visual+textual relevance with ColPali, and lets a vision LLM read the retrieved page directly, so nothing is lost to parsing.",
+  "failure_modes": [
+    "My documents contain tables, figures, and charts that text extraction mangles or drops, so questions about them get wrong answers",
+    "The answer lives inside a table or diagram in a PDF and my text-chunk retriever never surfaces it",
+    "My PDF parsing/OCR ingestion pipeline is brittle — multi-column layouts, scanned pages, and complex formatting keep breaking it",
+    "Captioning or summarizing images at ingestion time loses the fine-grained detail needed to answer specific questions later",
+    "Chunking strips away page layout context (table structure, captions, headers) that the answer depends on"
+  ],
+  "when_to_use": [
+    "Your corpus is visually rich PDFs — scientific papers, financial reports, slide decks, product datasheets, scanned documents — where answers often sit in tables, plots, or diagrams",
+    "You want zero document parsing: no OCR, no layout analysis, no chunking logic to maintain",
+    "You have (or can call) a vision-capable LLM for generation and a GPU for ColPali embedding",
+    "Page-level retrieval granularity is acceptable (the unit of evidence is a whole page image)",
+    "A captioning-based multimodal pipeline is losing detail and you want the model to see the original pixels at answer time"
+  ],
+  "tradeoffs": [
+    "Needs a GPU to run the ColPali model for indexing and query encoding; index build is slower than text embedding",
+    "Late-interaction (multi-vector) page embeddings make the index much larger than single-vector text indexes, and store_collection_with_index=True additionally stores a base64 image of every page",
+    "Every answer requires a vision LLM call with an image in the prompt — higher per-query token cost and latency than text-only generation",
+    "Retrieval granularity is a whole page; you cannot pull sub-page snippets, and stuffing many page images into context gets expensive fast (notebook uses k=1)",
+    "Retrieved evidence is pixels, not text — cross-encoder reranking, keyword filtering, quoting, and citation of exact passages are harder",
+    "byaldi builds a local on-disk index (.byaldi/), fine for demos but not a production vector store; large corpora need ColPali-aware infrastructure (multi-vector support in Vespa/Qdrant etc.)",
+    "Overkill for plain-text corpora — a standard text embedding pipeline is cheaper, finer-grained, and easier to debug"
+  ],
+  "how_it_works": "Indexing: byaldi's RAGMultiModalModel loads the vidore/colpali-v1.2 checkpoint (a PaliGemma-based vision-language retriever trained with ColBERT-style late interaction). RAG.index() renders each PDF page to an image and embeds it into a grid of patch-level vectors; with store_collection_with_index=True the base64-encoded page image is stored alongside the embeddings in a local .byaldi index (the notebook indexes the 15-page 'Attention Is All You Need' paper). Retrieval: RAG.search(query, k=1) embeds the natural-language query into token vectors and scores pages via MaxSim late interaction between query tokens and page patches, returning the top page with its base64 image. Generation: the base64 payload is decoded to a JPEG, opened with PIL, and passed together with the raw query to Gemini 1.5 Flash via generate_content([image, query]); the VLM reads the page visually (e.g., a results table) and answers ('BLEU score of Transformer base is 27.3'). The technique primarily changes retrieval, but it also redefines indexing (pages-as-images, no chunking) and generation (vision LLM over page images).",
+  "key_dependencies": [
+    "byaldi (RAGMultiModalModel wrapper around ColPali)",
+    "vidore/colpali-v1.2 (Hugging Face model; requires HF token)",
+    "google-generativeai (Gemini 1.5 Flash for vision-grounded generation)",
+    "Pillow (PIL) for image handling",
+    "transformers (installed from git), qwen-vl-utils, flash-attn, bitsandbytes (environment setup for the vision model stack)",
+    "base64 / os (stdlib) for image payload handling"
+  ],
+  "key_code_signals": [
+    "from byaldi import RAGMultiModalModel",
+    "RAGMultiModalModel.from_pretrained(\"vidore/colpali-v1.2\")",
+    "RAG.index(input_path=\"./docs/attention_is_all_you_need.pdf\", store_collection_with_index=True)",
+    "results = RAG.search(query, k=1)",
+    "image_bytes = base64.b64decode(results[0].base64)",
+    "genai.GenerativeModel(model_name=\"gemini-1.5-flash\")",
+    "model.generate_content([image, query])"
+  ],
+  "related_techniques": [
+    "multi_model_rag_with_captioning: alternative (captions images/tables into text at ingestion and retrieves text; ColPali instead retrieves the page pixels and defers understanding to a VLM at query time)",
+    "simple_rag: alternative (text-chunk baseline that this replaces for visually rich documents)",
+    "semantic_chunking: alternative (page-as-image indexing sidesteps chunking decisions entirely)",
+    "reranking: refines (retrieved page-image candidates could be reranked, e.g., by a VLM judge, before generation)",
+    "hyde-hypothetical-document-embedding: composes (query-side transformations can still be applied before ColPali search)"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "colpali",
+    "byaldi",
+    "multimodal RAG",
+    "vision retrieval",
+    "PDF pages as images",
+    "tables and figures",
+    "charts in PDFs",
+    "late interaction",
+    "multi-vector embeddings",
+    "vidore",
+    "gemini vision",
+    "VLM",
+    "no OCR",
+    "no parsing",
+    "document screenshots",
+    "scanned documents",
+    "visual document retrieval",
+    "page-level retrieval"
+  ],
+  "summary": "When answers live in tables, charts, figures, or complex layouts inside PDFs, text-extraction RAG fails: OCR and parsing mangle tables, drop figures, and chunking destroys layout context. This technique eliminates parsing entirely by indexing each PDF page as an image with ColPali (vidore/colpali-v1.2 via byaldi's RAGMultiModalModel), a vision-language retriever that embeds page images into multi-vector patch embeddings and scores them against query tokens with ColBERT-style late interaction. RAG.index() stores base64 page images alongside the index; RAG.search(query, k=1) returns the most relevant page, which is decoded and passed with the raw query to Gemini 1.5 Flash (generate_content([image, query])), letting the vision LLM read the page pixels and answer — the demo correctly reads a BLEU score out of a results table in the 'Attention Is All You Need' paper. Costs: GPU for ColPali, a larger multi-vector index plus stored page images, vision-LLM tokens per query, and page-level (not snippet-level) evidence granularity. Best for visually rich or scan-heavy corpora; unnecessary for plain text.",
+  "notes_for_chunking": "Structure: one dense overview markdown cell near the top (Overview / Key Components / Diagram / Motivation / Method Details / Benefits / Implementation / Summary) carries nearly all conceptual content and should be kept intact as a single chunk or split by its bold subheadings. After that the markdown/code ratio drops sharply: remaining markdown cells are thin one-line section headers ('Setup', 'Indexing', 'Query time', 'Actual image data', 'Test using gemini-1.5-flash') over short 1-6 line code cells that are NOT self-contained (query, filename, results flow across cells) — group each header with its following code cells. Junk to strip: leading promotional book-plug markdown cell; trailing tracking-pixel markdown cell; three redundant pip-install cells including a nonsensical one ('pip install base64 byaldi os ragmultimodalmodel' — stdlib modules and a nonexistent package); wget download log output; a very large base64 image display output (flagged as too large to render); hardcoded API-key placeholder lines. Header quality is low (generic gerunds), so prefer the overview cell's vocabulary for embedding.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/multi_model_rag_with_colpali.json"
+}

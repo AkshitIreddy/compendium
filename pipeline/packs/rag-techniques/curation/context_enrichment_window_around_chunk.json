@@ -1,0 +1,77 @@
+{
+  "slug": "context_enrichment_window_around_chunk",
+  "title": "Context Enrichment Window Around Retrieved Chunk",
+  "one_liner": "After vector retrieval, fetch the N neighboring chunks before and after each hit (by stored chunk index) and stitch them into one overlap-deduplicated passage, so the LLM sees the surrounding context instead of an isolated fragment.",
+  "stage": "post-retrieval",
+  "problem_solved": "Small chunks embed and match well but read badly: the top-scoring chunk is often a mid-sentence fragment whose meaning depends on the sentences immediately before and after it. This technique keeps the precision of small-chunk vector search while returning a wider, coherent window of the original document around each hit, without changing what gets embedded.",
+  "failure_modes": [
+    "The retrieved chunk is relevant but cut off mid-sentence or mid-argument, so the answer is incomplete or wrong",
+    "Answers miss facts that sit in the sentence right before or after the matched chunk",
+    "Small chunks were chosen for embedding precision, but they are too short for the LLM to answer from",
+    "Vector search returns isolated text fragments that lack the narrative or definitional context around them",
+    "Increasing chunk size to fix context problems degraded retrieval precision"
+  ],
+  "when_to_use": [
+    "Your documents are continuous prose (reports, articles, books, transcripts) where facts depend on surrounding sentences and sections",
+    "You deliberately use small chunks (a few hundred characters) for embedding precision but generation needs more context",
+    "Answers cite the right passage but are truncated or missing the qualifier that appears just outside the chunk boundary",
+    "You want better grounding context without re-embedding, extra LLM calls, or changing your chunking strategy",
+    "You control the chunking step and can tag each chunk with a sequential index in metadata"
+  ],
+  "tradeoffs": [
+    "Requires chunking-time cooperation: every chunk must carry a sequential index in metadata, and you must know the original chunk_size/chunk_overlap to deduplicate overlap correctly at stitch time",
+    "Larger returned passages consume more of the generation context window and can dilute relevance if neighbors are off-topic",
+    "Fixed window size is blind to topic boundaries: it may pull in unrelated adjacent text (Relevant Segment Extraction addresses this dynamically)",
+    "The notebook's neighbor lookup (get_chunk_by_index) does a full vectorstore scan per lookup, O(N) per neighbor; production needs a docstore keyed by index instead",
+    "The notebook also stores the full document text in every chunk's metadata, which bloats the index and should not be copied as-is",
+    "Not useful when chunks are already self-contained (FAQ entries, propositions, table rows) or when documents have no meaningful linear order (e.g. independent records)"
+  ],
+  "how_it_works": "At chunking time (prerequisite step), the document is split into fixed-size character chunks with overlap by a custom split_text_to_chunks_with_indices function, and each chunk's metadata records its chronological index. Chunks are embedded with OpenAIEmbeddings and stored in a FAISS vector store; a standard retriever with k=1 fetches the best-matching chunk. The core post-retrieval step, retrieve_with_context_overlap, takes each retrieved chunk's index, computes the range [index - num_neighbors, index + num_neighbors], fetches every chunk in that range via get_chunk_by_index (a metadata scan over the store), sorts them by index, and concatenates them while trimming the known chunk_overlap characters between adjacent chunks so the reconstructed passage reads as continuous original text. The notebook demonstrates the difference on a climate-change PDF and a synthetic AI-history document: baseline retrieval returns a truncated fragment about deep learning, while the enriched version returns the fragment plus the preceding and following paragraphs, making the answer self-contained. No LLM calls are involved; the technique spans chunking (index metadata) and post-retrieval (window expansion), with post-retrieval dominant.",
+  "key_dependencies": [
+    "langchain (Document, FAISS vectorstore wrapper, retriever interface)",
+    "FAISS (vector index)",
+    "OpenAI embeddings via langchain OpenAIEmbeddings (requires OPENAI_API_KEY)",
+    "python-dotenv",
+    "repo helper_functions (read_pdf_to_string, show_context) and evaluation.evalute_rag"
+  ],
+  "key_code_signals": [
+    "split_text_to_chunks_with_indices(text, chunk_size, chunk_overlap) tagging metadata={'index': len(chunks)}",
+    "FAISS.from_documents(docs, OpenAIEmbeddings())",
+    "vectorstore.as_retriever(search_kwargs={'k': 1})",
+    "get_chunk_by_index(vectorstore, target_index) via similarity_search('', k=vectorstore.index.ntotal) metadata scan",
+    "retrieve_with_context_overlap(vectorstore, retriever, query, num_neighbors, chunk_size, chunk_overlap)",
+    "overlap-aware concatenation: concatenated_text[:len(concatenated_text)-chunk_overlap] + next_chunk",
+    "side-by-side comparison of baseline retriever output vs enriched window output"
+  ],
+  "related_techniques": [
+    "relevant_segment_extraction: refines this idea by dynamically sizing the window from cluster of relevant chunks instead of a fixed neighbor count",
+    "semantic_chunking: alternative that prevents fragmented chunks at split time rather than repairing them after retrieval",
+    "contextual_chunk_headers: complementary; adds document/section-level context to the embedding, while this adds local neighbor context at read time",
+    "choose_chunk_size: prerequisite tuning; this technique lets you keep chunks small for precision and still return wide context",
+    "contextual_compression: opposite direction (shrinks retrieved context); can be applied after enrichment to trim irrelevant neighbor text",
+    "hierarchical_indices: alternative for long documents using summary-level then chunk-level retrieval",
+    "reranking: composes; rerank small chunks first, then expand only the winners",
+    "proposition_chunking: alternative when you want self-contained retrieval units instead of windowed reconstruction"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "sentence window retrieval",
+    "neighboring chunks",
+    "expand retrieved chunk",
+    "surrounding context",
+    "chunk too small",
+    "truncated chunk",
+    "isolated fragment",
+    "small-to-big retrieval",
+    "parent document retriever",
+    "context window enrichment",
+    "chunk index metadata",
+    "overlap deduplication",
+    "FAISS",
+    "post-retrieval expansion",
+    "coherent passage reconstruction"
+  ],
+  "summary": "Context enrichment window fixes the classic small-chunk RAG failure: the top-scoring chunk is relevant but fragmentary, cut off mid-sentence, and missing the qualifying sentences around it. Instead of enlarging chunks (which hurts embedding precision), documents are split into small fixed-size overlapping chunks, each tagged with a sequential index in metadata. Retrieval runs normally against a FAISS index of OpenAI embeddings; then a post-retrieval step fetches the num_neighbors chunks before and after each hit by index, sorts them, and concatenates them while trimming the known chunk overlap, reconstructing a continuous passage of original text centered on the match. The LLM receives coherent, self-contained context while search stays precise. Costs are minimal, no extra LLM calls or re-embedding, but it needs chunking-time index metadata, known chunk_size/chunk_overlap values, and an efficient chunk-by-index lookup (the notebook's full-store scan is O(N) and should be replaced by a docstore). Best for continuous prose like reports and transcripts; unnecessary for self-contained units, and blind to topic boundaries compared to relevant segment extraction.",
+  "notes_for_chunking": "Well-structured notebook, easy to chunk. One long overview markdown cell (cell-1) contains the entire motivation/method/benefits narrative and is the highest-value prose; it uses clean H2/H3 headers. Two image-only markdown cells (SVG diagrams, cells 2-3) can be dropped or replaced with alt text. Cells 4-9 are junk for retrieval purposes: pip install, git clone + sys.path boilerplate, wget data download (duplicated line), and a deepeval version warning output. The core content is three code cells with one-line markdown headers above each: split_text_to_chunks_with_indices (cell-14), get_chunk_by_index (cell-20), and retrieve_with_context_overlap (cell-24, the centerpiece, with full docstring). Keep each function with its preceding markdown header as one chunk. Cell-28 embeds a large synthetic document string (AI history) plus a demo; the string itself is filler and could be truncated, but the printed baseline-vs-enriched output comparison is illustrative and worth keeping. Final cell is a tracking-pixel markdown image (strip). Markdown/code ratio roughly 40/60; sections are self-contained; header quality good but some headers are verbose sentences rather than titles.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/context_enrichment_window_around_chunk.json"
+}

@@ -1,0 +1,78 @@
+{
+  "slug": "microsoft_graphrag",
+  "title": "Microsoft GraphRAG: Knowledge-Graph-Based RAG with Community Summaries",
+  "one_liner": "Uses Microsoft's graphrag library to build an LLM-extracted knowledge graph with Leiden community summaries at index time, enabling local (entity-centric) and global (whole-corpus sensemaking) search that flat top-k chunk retrieval cannot answer.",
+  "stage": "indexing",
+  "problem_solved": "Standard chunk-embed-retrieve RAG fails on questions whose answer is not contained in any single chunk: holistic 'summarize the whole corpus' / 'what are the major themes' questions, and questions requiring connections between facts scattered across disparate documents. GraphRAG pre-computes an entity-relationship graph and hierarchical community summaries so the LLM can reason over corpus-wide structure instead of a handful of similar chunks.",
+  "failure_modes": [
+    "Questions about the corpus as a whole (themes, major accomplishments, overall trends) return shallow or wrong answers because no single retrieved chunk contains the global picture",
+    "Answers that require connecting related information spread across many documents or sections (multi-hop / disparate-source synthesis) miss key links",
+    "Entity-centric questions (all companies founded by X, everything related to entity Y) return incomplete answers because relevant facts are scattered beyond the top-k similar chunks",
+    "Similarity search retrieves chunks that mention the query terms but the system never aggregates or counts across the corpus",
+    "Complex semantic concepts are misunderstood because retrieval sees isolated text fragments without the relationships between entities"
+  ],
+  "when_to_use": [
+    "Your users ask global sensemaking questions over a corpus ('what are the main themes/risks/accomplishments in these documents') rather than needle-in-haystack lookups",
+    "Answers require synthesizing facts about the same entities from many different places in the corpus (multi-hop, aggregation, 'how are X and Y connected')",
+    "The corpus is relatively static and re-read often, so a one-time expensive indexing pass amortizes well",
+    "You want an off-the-shelf, batteries-included graph RAG pipeline (CLI-driven) rather than hand-rolling entity extraction and graph traversal",
+    "Entity-rich text (biographies, news, intelligence reports, organizational documents) where entities and relationships are the natural backbone of answers"
+  ],
+  "tradeoffs": [
+    "Indexing is dramatically more expensive and slower than embedding-only indexing: many LLM calls (entity/relationship extraction, community summarization) over every chunk; the notebook explicitly warns about this cost",
+    "Query-time global search runs an LLM map-reduce over community summaries, adding latency and token cost versus a single similarity lookup",
+    "Corpus changes require re-indexing (or incremental update machinery), so it's a poor fit for rapidly changing data",
+    "Heavy framework dependency: the notebook drives everything through the graphrag CLI and settings.yaml, giving less transparency and control than hand-built pipelines; debugging retrieval behavior is harder",
+    "Overkill for simple factoid lookup workloads where baseline top-k RAG is faster, cheaper, and accurate enough",
+    "Requires strong LLM (gpt-4o in the notebook) for extraction quality; weak models produce noisy graphs"
+  ],
+  "how_it_works": "The notebook installs the `graphrag` package and drives it entirely via CLI subcommands. Setup: credentials for Azure OpenAI or OpenAI are loaded from .env; `python -m graphrag.index --init --root data/graphrag` scaffolds a workspace, then the notebook rewrites settings.yaml (via PyYAML) to point llm at gpt-4o and embeddings at text-embedding-3-large. A Wikipedia article (Elon Musk) is scraped with requests/BeautifulSoup and dropped into the input folder. Indexing (`python -m graphrag.index --root ./data/graphrag`) then runs GraphRAG's pipeline: text chunking, LLM-based entity and relationship extraction, graph construction, Leiden community detection, and LLM summarization of each community — a lengthy, many-LLM-call, one-time build. Querying (`python -m graphrag.query`, wrapped in subprocess with GRAPHRAG_GLOBAL_SEARCH_MAX_TOKENS=10000 and a response_type instruction) supports two methods: 'local' search fans out from query-matched entities to their graph neighbors for entity-specific questions, and 'global' search map-reduces over community summaries for holistic corpus-level questions. A regex strips [Data: ...] provenance citations from responses. Though indexing dominates, the technique also spans retrieval (local/global search) and generation (map-reduce answer synthesis).",
+  "key_dependencies": [
+    "graphrag (Microsoft, CLI: graphrag.index / graphrag.query)",
+    "openai (OpenAI / AzureOpenAI clients)",
+    "python-dotenv",
+    "pyyaml",
+    "requests + beautifulsoup4 (data acquisition only)",
+    "subprocess (stdlib, to invoke the graphrag CLI)"
+  ],
+  "key_code_signals": [
+    "!python -m graphrag.index --init --root data/graphrag",
+    "!python -m graphrag.index --root ./data/graphrag",
+    "settings_yaml['llm']['model'] = \"gpt-4o\" / settings_yaml['embeddings']['llm']['model'] = 'text-embedding-3-large'",
+    "python -m graphrag.query --method local|global --response_type ...",
+    "GRAPHRAG_GLOBAL_SEARCH_MAX_TOKENS env var to cap query context",
+    "re.sub(r'\\[Data:.*?\\]', '', text) to strip provenance tags",
+    "AzureOpenAI(...) / OpenAI(...) dual-provider setup"
+  ],
+  "related_techniques": [
+    "graph_rag (Graph RAG with LangChain): alternative hand-built knowledge-graph RAG implementation",
+    "graphrag_with_milvus_vectordb: alternative graph RAG storing relationship triplets in a vector DB, lighter-weight for multi-hop questions",
+    "graph_rag_local_attribution (Local Graph RAG with Verifiable Attribution): alternative graph RAG variant emphasizing verifiable citations",
+    "raptor: alternative for corpus-level/global questions via a recursive summary tree instead of an entity graph",
+    "hierarchical_indices: lighter-weight alternative for two-level summary-then-chunk retrieval",
+    "simple_rag: baseline chunk-embedding RAG that GraphRAG replaces when global understanding is needed"
+  ],
+  "complexity": "high",
+  "keywords": [
+    "graphrag",
+    "microsoft graphrag",
+    "knowledge graph rag",
+    "entity extraction",
+    "community detection",
+    "leiden algorithm",
+    "community summaries",
+    "global search",
+    "local search",
+    "global sensemaking",
+    "multi-hop questions",
+    "summarize entire corpus",
+    "connect information across documents",
+    "entity relationships",
+    "map-reduce answer synthesis",
+    "expensive indexing",
+    "gpt-4o",
+    "azure openai"
+  ],
+  "summary": "Microsoft GraphRAG replaces flat chunk-embedding retrieval with an LLM-built knowledge graph over the corpus. At index time the graphrag CLI (python -m graphrag.index) chunks documents, uses GPT-4o to extract entities and relationships, builds a graph, detects communities with the Leiden algorithm, and writes LLM-generated summaries for each community; text-embedding-3-large embeddings are computed alongside. At query time (python -m graphrag.query) two modes exist: local search fans out from query-relevant entities to their graph neighbors for entity-specific questions, and global search map-reduces over community summaries to answer holistic whole-corpus sensemaking questions ('what are the major themes/accomplishments') that top-k similarity retrieval cannot answer because no single chunk contains the answer. It targets multi-hop questions and synthesis of disparate, scattered facts. Costs: indexing makes many LLM calls, so the build is slow and far more expensive than embedding-only indexing, and global queries add LLM map-reduce latency; corpus changes force re-indexing. The notebook configures settings.yaml for Azure OpenAI or plain OpenAI and demonstrates both search modes on a scraped Wikipedia article.",
+  "notes_for_chunking": "Structure: 24 cells, markdown-heavy front, thin code. Cell 0 is a book-promo ad (strip). Cells 1 and 23 are view-tracker badge pixels, one as a 'raw' cell (strip; note raw cell type exists here). Cell 2 is one giant self-contained markdown cell holding the entire conceptual content (Overview, Motivation, Key Components, Method Details indexing/query stages, Benefits, Conclusion) under H1/H2 headers — ideal to split by H2 but the headers use inline formatting inconsistently (some 'headers' are plain bold lines like 'Indexing Stage'). Cell 3 is an image-only markdown cell (relative SVG path, strip or keep as figure ref). Cell 5 is a bare .env template code cell with no imports (easily mistaken for config junk). Three separate near-duplicate pip-install cells (6, 8, 10) — strip all. Real code is only 5 cells: client setup, web scrape, YAML config + CLI index, subprocess query helper, two query invocations. Code cells depend on prior cells (env vars, `oai` unused after setup, `elon` text) so they are not fully self-contained; keep the yaml-config and query-helper cells paired with their preceding markdown explanations. Outputs are trivial (Markdown display objects), no base64 blobs to strip."
+}

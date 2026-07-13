@@ -1,0 +1,82 @@
+{
+  "slug": "proposition_chunking",
+  "title": "Proposition Chunking",
+  "one_liner": "Use an LLM to decompose documents into atomic, self-contained factual propositions, quality-grade them with a second LLM pass, and index the surviving propositions in a vector store for fine-grained retrieval.",
+  "stage": "chunking",
+  "problem_solved": "Conventional fixed-size chunks bundle many facts together, so the embedding of a chunk is a blurry average of multiple topics and retrieved chunks carry irrelevant surrounding text. Fine-grained factual queries (who/when/what) either miss the buried fact or drag in noise. Proposition chunking re-indexes the corpus as minimal, decontextualized factual statements so retrieval returns exactly the fact needed.",
+  "failure_modes": [
+    "Specific factual questions retrieve long chunks where the answer is buried among unrelated sentences",
+    "Retrieved chunks pollute the context window with irrelevant text, diluting or distracting the generator",
+    "Chunk embeddings average multiple topics, so precise queries match poorly against multi-topic chunks",
+    "Retrieved text is uninterpretable in isolation because of pronouns and ambiguous references ('he', 'the company') that lost their antecedent at chunk boundaries",
+    "Answers to simple factoid queries are verbose or imprecise because the context handed to the LLM is much broader than the question"
+  ],
+  "when_to_use": [
+    "Your workload is dominated by short factoid queries (who/when/what/which) against fact-dense prose such as reports, wikis, encyclopedic or news-like content",
+    "You need highly precise, minimal context per retrieval hit rather than broad passages (e.g., strict token budgets, or downstream extraction pipelines)",
+    "Retrieved chunks keep containing the right region of text but the answer is diluted by surrounding material",
+    "Your corpus is small-to-medium and static enough that a per-chunk plus per-proposition LLM indexing pass is affordable",
+    "You want a quality gate on index content: each proposition is LLM-graded on accuracy/clarity/completeness/conciseness before being embedded"
+  ],
+  "tradeoffs": [
+    "Expensive index build: one LLM call per base chunk to generate propositions plus one LLM call per proposition to grade it; cost and build time scale with corpus size far worse than plain chunking",
+    "Index size grows: each chunk explodes into many propositions, multiplying embedding calls and vector count",
+    "Low contextual richness: propositions strip narrative flow, so questions needing surrounding context, synthesis, summarization, or multi-hop reasoning across a passage do worse than with larger chunks (the notebook's own comparison concedes this)",
+    "Proposition generation is model-dependent and can hallucinate, mis-split, or omit facts; the quality gate discards borderline propositions, silently losing recall (the notebook shows real propositions failing thresholds)",
+    "Not suited to tabular, structured, or visual content; assumes declarative factual prose",
+    "Avoid when queries are open-ended/analytical, when the corpus updates frequently (re-propositionizing churn), or when you cannot afford LLM-in-the-loop indexing; consider retrieving propositions but expanding to their parent chunk (chunk_id metadata) if the generator needs context"
+  ],
+  "how_it_works": "Indexing-time pipeline (spans chunking and indexing; retrieval itself is standard similarity search): (1) split the document into ~200-token base chunks with RecursiveCharacterTextSplitter.from_tiktoken_encoder (overlap 50) and tag each with a chunk_id; (2) for each chunk, invoke a ChatGroq LLM (llama-3.1-70b-versatile, temperature 0) with a few-shot prompt (FewShotChatMessagePromptTemplate) and structured output bound to a Pydantic GeneratePropositions model, yielding a list of atomic statements that each express a single fact, resolve pronouns to full names, include dates/qualifiers, and stand alone without context; (3) grade every proposition against its source chunk with a second structured-output LLM chain (GradePropositions) scoring accuracy, clarity, completeness, and conciseness 1-10, keeping only propositions scoring >=7 on all four; (4) embed surviving propositions (OllamaEmbeddings, nomic-embed-text:v1.5) into a FAISS vector store and expose it as a k=4 similarity retriever, each proposition carrying its parent chunk_id in metadata. The notebook then builds a parallel FAISS store over the raw 200-token chunks and runs three test queries against both, showing proposition retrieval returns pinpoint facts while chunk retrieval returns broader but noisier passages; a closing comparison table summarizes precision-vs-context tradeoffs.",
+  "key_dependencies": [
+    "langchain / langchain-core (prompts, Document, pydantic_v1 models)",
+    "langchain-community (FAISS vectorstore wrapper, OllamaEmbeddings)",
+    "langchain-groq (ChatGroq LLM client)",
+    "Groq API (llama-3.1-70b-versatile, requires GROQ_API_KEY)",
+    "Ollama local embedding server (nomic-embed-text:v1.5)",
+    "faiss-cpu",
+    "python-dotenv"
+  ],
+  "key_code_signals": [
+    "class GeneratePropositions(BaseModel) with propositions: List[str] — structured-output schema for atomic fact extraction",
+    "llm.with_structured_output(GeneratePropositions) on ChatGroq(model=\"llama-3.1-70b-versatile\", temperature=0)",
+    "FewShotChatMessagePromptTemplate with a Neil Armstrong document→propositions example",
+    "System prompt enforcing: single fact, self-contained, full names not pronouns, dates/qualifiers, one subject-predicate relationship",
+    "class GradePropositions(BaseModel) scoring accuracy/clarity/completeness/conciseness 1-10 with thresholds = {each: 7} and passes_quality_check()",
+    "RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=200, chunk_overlap=50) producing base chunks with chunk_id metadata",
+    "FAISS.from_documents(evaluated_propositions, embedding_model) vs FAISS.from_documents(doc_splits, embedding_model) — side-by-side proposition vs chunk retrievers, both k=4",
+    "OllamaEmbeddings(model='nomic-embed-text:v1.5')"
+  ],
+  "related_techniques": [
+    "choose_chunk_size: alternative — tunes fixed-size chunking instead of re-representing content as atomic facts",
+    "semantic_chunking: alternative — splits on semantic boundaries but keeps original text rather than rewriting it",
+    "contextual_chunk_headers: complementary-opposite — adds context to chunks, whereas propositions strip content down to atoms; useful counterweight",
+    "context_enrichment_window_around_chunk: complementary — the chunk_id metadata on each proposition enables expanding a hit back to its parent/neighboring chunks to restore lost context",
+    "HyPE_Hypothetical_Prompt_Embeddings: related — both spend LLM calls at index time to create retrieval-friendlier representations of content",
+    "reliable_rag: related pattern — reuses the LLM-as-grader structured-output pattern, here applied to index content instead of retrieved docs",
+    "raptor: alternative index-time LLM transformation — hierarchical summaries (coarser) vs propositions (finer)",
+    "simple_rag: refines — drop-in replacement for the naive chunk-embed-retrieve indexing step"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "proposition chunking",
+    "atomic facts",
+    "factoid retrieval",
+    "fine-grained retrieval",
+    "dense x retrieval",
+    "propositionizer",
+    "self-contained statements",
+    "decontextualization",
+    "pronoun resolution",
+    "chunk granularity",
+    "LLM-based chunking",
+    "fact extraction",
+    "precise retrieval",
+    "chunk size",
+    "quality-checked index",
+    "answer buried in chunk",
+    "irrelevant context in retrieved chunks"
+  ],
+  "summary": "Proposition chunking replaces raw text chunks with LLM-generated atomic facts as the unit of indexing and retrieval. The problem: fixed-size chunks mix many facts, so embeddings blur topics, factoid queries miss buried answers, and retrieved passages carry irrelevant text and unresolved pronouns into the context window. The method: split documents into ~200-token base chunks, then use a structured-output LLM (ChatGroq llama-3.1-70b, few-shot prompted) to rewrite each chunk as self-contained propositions — one fact each, full entity names instead of pronouns, dates and qualifiers included. A second LLM grades every proposition 1-10 on accuracy, clarity, completeness, and conciseness; only propositions scoring at least 7 on all four are embedded (Ollama nomic-embed-text) into a FAISS store, each keeping its parent chunk_id. Side-by-side tests against a larger-chunk retriever show propositions win on precision and brevity for factual who/when/what queries, while larger chunks win on contextual richness and complex analytical questions. Costs: an LLM call per chunk plus per proposition at index time, a much larger vector count, and loss of narrative context.",
+  "notes_for_chunking": "Structure is clean and pipeline-ordered. Cell 0 is a book-promotion markdown cell (strip). Cell 2 is one giant self-contained markdown cell holding Overview, Key Components, Motivation, Method Details, Benefits, Implementation, and Summary under H3 headers plus an <img> reference to ../images/proposition_chunking.svg — it duplicates much of what the code shows, so consider splitting it by H3 or deduplicating against code sections. Cell 4 is a pip install (strip). Subsequent H3 markdown headers (Chunking, Generate Propositions, Quality Check, Embedding propositions in a vectorstore, Comparing performance with larger chunks size, Testing with H4 Test-1/2/3) map one-to-one onto the following code cells, making header-anchored chunking reliable. Code cells are medium-sized with meaningful inline comments; two contain long embedded prompt strings (proposition-generation system prompt, evaluation prompt) that are high-value content, not boilerplate. Outputs are short printed retrieval results and OllamaEmbeddings progress bars — the retrieval printouts are useful evidence of the precision-vs-context contrast, progress bars are junk. The final markdown comparison table (proposition vs simple chunk retrieval across nine aspects) is the densest takeaway cell; the last cell is a tracking-pixel image (strip). No base64 blobs.",
+  "file_written": "C:\\Users\\akshi\\Desktop\\Code Palace\\rag knowledge base\\research\\corpus\\proposition_chunking.json"
+}

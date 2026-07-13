@@ -1,0 +1,956 @@
+{
+  "_meta": {
+    "source": "Synthesized from 44 per-notebook technique analyses of NirDiamant/RAG_Techniques plus _repo-overview.json",
+    "generated": "2026-07-13",
+    "relation_semantics": "Edges are directed source -> target. composes_with: source and target stack in one pipeline (symmetric, may appear on either or both sides). alternative_to: source and target solve the same problem differently (symmetric). refines: source is an improved/extended/drop-in-upgraded version of target. prerequisite_of: source must be in place before target is useful (edge lives on the prerequisite). evaluated_by: target is an evaluation harness that measures source's quality.",
+    "normalizations": [
+      "simple_rag_with_llamaindex stage changed indexing -> retrieval to match simple_rag (framework variants share the base technique's stage)",
+      "context_enrichment_window_around_chunk_with_llamaindex stage changed chunking -> post-retrieval to match context_enrichment_window_around_chunk",
+      "Dropped dangling relation targets with no notebook/analysis: multi_faceted_filtering (README-only conceptual entry referenced by 7 analyses), dsRAG (external library), Controllable-RAG-Agent (external repo), 'evaluation-with-ragas' (RAGAS is internal to end-2-end_rag_evaluation), 'metadata_filtering-style approaches' (json_rag)",
+      "Normalized analyst slug spellings: HyDe_Hypothetical_Document_Embedding -> hyde_hypothetical_document_embedding, HyPE_Hypothetical_Prompt_Embeddings -> hype_hypothetical_prompt_embeddings, Microsoft_GraphRag/microsoft-graphrag -> microsoft_graphrag, grouse -> evaluation_grouse, deep_evaluation/deepeval -> evaluation_deep_eval, hyphenated slugs (self-rag, fusion-retrieval, ...) -> underscored canonical slugs",
+      "Repaired mangled relation entry in graph_rag_local_attribution ('multi_model_rag_with_captioning-or-plain vector RAG (simple_rag)') -> simple_rag alternative_to"
+    ]
+  },
+  "stages": [
+    {
+      "id": "chunking",
+      "name": "Chunking",
+      "position": 1,
+      "description": "How documents are split into retrieval units before anything is embedded: fixed-size tuning, semantic boundaries, atomic propositions, and per-chunk context headers."
+    },
+    {
+      "id": "indexing",
+      "name": "Indexing & Index Enrichment",
+      "position": 2,
+      "description": "How the searchable index is built and enriched beyond plain chunk embeddings: synthetic-question embeddings, summary tiers, knowledge graphs, structured-data ingestion, and multimodal captioning."
+    },
+    {
+      "id": "query-transformation",
+      "name": "Query Transformation",
+      "position": 3,
+      "description": "Reshaping the user's query before search: rewriting, step-back, decomposition, hypothetical answer documents, and memory-grounded surrogate queries."
+    },
+    {
+      "id": "retrieval",
+      "name": "Retrieval",
+      "position": 4,
+      "description": "The search execution itself: dense baseline, hybrid dense+sparse fusion, diversity-aware selection, query-type routing, graph traversal, and vision-based page retrieval."
+    },
+    {
+      "id": "post-retrieval",
+      "name": "Post-Retrieval Processing",
+      "position": 5,
+      "description": "What happens to candidates between retriever and generator: reranking, compression, neighbor-window expansion, segment reconstruction, relevance gating, explanation, and feedback-driven re-scoring."
+    },
+    {
+      "id": "orchestration",
+      "name": "Orchestration & Architecture",
+      "position": 6,
+      "description": "Pipeline-level control flow and end-to-end architectures: self-reflective loops, corrective routing with fallbacks, managed agentic platforms, and fully-local deployments."
+    },
+    {
+      "id": "evaluation",
+      "name": "Evaluation",
+      "position": 7,
+      "description": "Measuring RAG quality offline: LLM-as-judge metrics for correctness/faithfulness/relevancy, grounded-QA frameworks, reference-free scoring, and meta-evaluation of the judges themselves."
+    }
+  ],
+  "failure_modes": [
+    {
+      "id": "fm-cold-start",
+      "name": "No grounded QA baseline",
+      "description": "There is no retrieval pipeline at all yet: the LLM cannot answer questions about private documents, and the documents are too long to paste into the context window.",
+      "example_phrasings": [
+        "The model hallucinates or says 'I don't know' about my own PDFs",
+        "My documents don't fit in the context window",
+        "I need a working chat-with-my-docs starting point"
+      ],
+      "techniques": ["simple_rag", "simple_rag_with_llamaindex", "local_rag_huggingface_faiss", "simple_csv_rag", "simple_csv_rag_with_llamaindex", "json_rag"]
+    },
+    {
+      "id": "fm-vocab-mismatch",
+      "name": "Query-document vocabulary and style mismatch",
+      "description": "Users phrase queries differently from the corpus (short questions vs long declarative prose, synonyms, jargon), so embedding similarity ranks the truly relevant passage below superficially similar ones.",
+      "example_phrasings": [
+        "Search misses the right passage when the question uses different words than the document",
+        "My users ask short questions but my docs are dense formal prose",
+        "The chunk that answers the question exists but never comes back in top-k"
+      ],
+      "techniques": ["hyde_hypothetical_document_embedding", "hype_hypothetical_prompt_embeddings", "query_transformations", "document_augmentation", "memorag", "fusion_retrieval", "fusion_retrieval_with_llamaindex", "contextual_chunk_headers", "graphrag_with_milvus_vectordb"]
+    },
+    {
+      "id": "fm-exact-term-miss",
+      "name": "Exact terms, IDs, and rare tokens missed",
+      "description": "Dense embeddings smooth over rare words, product codes, acronyms, and identifiers, so queries for exact strings return only vaguely related chunks.",
+      "example_phrasings": [
+        "Searching for a specific error code or part number returns unrelated text",
+        "Embeddings can't find the doc that literally contains my search term",
+        "Acronyms and domain jargon retrieve the wrong passages"
+      ],
+      "techniques": ["fusion_retrieval", "fusion_retrieval_with_llamaindex"]
+    },
+    {
+      "id": "fm-fragmented-context",
+      "name": "Retrieved chunk lacks surrounding context",
+      "description": "The matched chunk is relevant but cut off mid-idea or stripped of the neighboring sentences/sections it depends on, so the generator answers from an incomplete fragment.",
+      "example_phrasings": [
+        "Retrieved chunks are cut off mid-sentence and the answer is incomplete",
+        "The fact I need is in the sentence right after the chunk that matched",
+        "Answers read as disjointed because the model only sees isolated snippets"
+      ],
+      "techniques": ["context_enrichment_window_around_chunk", "context_enrichment_window_around_chunk_with_llamaindex", "relevant_segment_extraction", "semantic_chunking", "choose_chunk_size", "graph_rag", "raptor", "hierarchical_indices"]
+    },
+    {
+      "id": "fm-context-noise",
+      "name": "Irrelevant chunks pollute the context window",
+      "description": "Top-k similarity returns off-topic or marginally relevant chunks that dilute the signal, distract the generator, and crowd out the passages that actually answer the question.",
+      "example_phrasings": [
+        "The answer is buried among unrelated sentences in what got retrieved",
+        "Adding more retrieved chunks makes answers worse, not better",
+        "The model gets derailed by off-topic text that sat in the same chunk"
+      ],
+      "techniques": ["contextual_compression", "reranking", "reranking_with_llamaindex", "reliable_rag", "self_rag", "crag", "proposition_chunking", "hierarchical_indices", "dartboard", "adaptive_retrieval", "contextual_chunk_headers", "semantic_chunking", "relevant_segment_extraction", "choose_chunk_size", "explainable_retrieval"]
+    },
+    {
+      "id": "fm-low-rank",
+      "name": "Right passage retrieved but ranked too low",
+      "description": "The correct chunk is in the candidate pool but sits below the k cutoff passed to the generator, because raw embedding similarity cannot judge nuanced relevance.",
+      "example_phrasings": [
+        "The correct passage is at rank 8-20 and gets cut before generation",
+        "Chunks that mention my keywords outrank the one that actually answers",
+        "I want high recall retrieval but only send a few precise chunks to the LLM"
+      ],
+      "techniques": ["reranking", "reranking_with_llamaindex", "fusion_retrieval_with_llamaindex", "hype_hypothetical_prompt_embeddings", "document_augmentation", "hyde_hypothetical_document_embedding"]
+    },
+    {
+      "id": "fm-redundancy",
+      "name": "Redundant or one-sided results",
+      "description": "Top-k results are near-duplicates of each other or all cover a single aspect/viewpoint, so raising k adds no new information and multi-faceted questions get one-sided answers.",
+      "example_phrasings": [
+        "My top results all repeat the same passage",
+        "The corpus has duplicated content and retrieval keeps surfacing the copies",
+        "Questions about debates return documents that all take the same side"
+      ],
+      "techniques": ["dartboard", "adaptive_retrieval", "reranking"]
+    },
+    {
+      "id": "fm-multi-hop",
+      "name": "Multi-hop questions fail",
+      "description": "Answering requires chaining facts scattered across different chunks or documents; flat top-k retrieval fetches each fragment independently and never connects them.",
+      "example_phrasings": [
+        "Questions that need facts from several places connected together get wrong answers",
+        "How-are-X-and-Y-related questions fail completely",
+        "No single chunk contains the full chain of reasoning"
+      ],
+      "techniques": ["graph_rag", "graph_rag_local_attribution", "graphrag_with_milvus_vectordb", "microsoft_graphrag", "raptor", "query_transformations", "agentic_rag", "memorag"]
+    },
+    {
+      "id": "fm-global-synthesis",
+      "name": "Corpus-level and thematic questions unanswerable",
+      "description": "Questions about themes, overall trends, summaries, or aggregates over the whole corpus cannot be answered from any single retrieved chunk.",
+      "example_phrasings": [
+        "'What are the main themes of this report?' returns shallow answers",
+        "Questions needing a global picture of a 600-page book fail",
+        "The system never aggregates or counts across the corpus"
+      ],
+      "techniques": ["raptor", "microsoft_graphrag", "memorag", "graph_rag", "hierarchical_indices"]
+    },
+    {
+      "id": "fm-multi-aspect",
+      "name": "Multi-part questions only partially answered",
+      "description": "A single query embedding cannot cover every facet of a compound question, so retrieval collapses onto one aspect and the rest go unanswered.",
+      "example_phrasings": [
+        "Complex multi-part questions get only partially answered",
+        "Compare/contrast questions pull chunks about only one side",
+        "Broad questions get answered from a single narrow angle"
+      ],
+      "techniques": ["query_transformations", "adaptive_retrieval", "hyde_hypothetical_document_embedding", "agentic_rag", "dartboard"]
+    },
+    {
+      "id": "fm-vague-query",
+      "name": "Vague, underspecified, or conversational queries",
+      "description": "The user's query is too vague, high-level, or conversationally phrased to be a good search key; nothing in the corpus literally matches its wording or intent.",
+      "example_phrasings": [
+        "Vague questions return generic off-topic chunks",
+        "Users don't know how to phrase questions in the corpus's terms",
+        "Multi-turn follow-ups lose the context of the conversation"
+      ],
+      "techniques": ["query_transformations", "memorag", "adaptive_retrieval", "agentic_rag"]
+    },
+    {
+      "id": "fm-mixed-workload",
+      "name": "One retrieval strategy doesn't fit all query types",
+      "description": "The workload mixes factual lookups, analytical questions, opinions, and keyword queries; tuning retrieval for one type degrades the others.",
+      "example_phrasings": [
+        "Retrieval works for fact lookups but fails on explain/compare questions",
+        "Some queries need exact matching, others need semantic understanding",
+        "Quality is inconsistent across different kinds of questions"
+      ],
+      "techniques": ["adaptive_retrieval", "fusion_retrieval", "agentic_rag", "self_rag"]
+    },
+    {
+      "id": "fm-hallucination",
+      "name": "Answers not grounded in retrieved evidence",
+      "description": "Generated answers contain claims the retrieved documents do not support: the model mixes parametric knowledge with evidence, or answers confidently from irrelevant context.",
+      "example_phrasings": [
+        "Answers sound plausible but aren't supported by the sources",
+        "The model answers from its own knowledge instead of my documents",
+        "Hallucinated facts slip through with no automated detection"
+      ],
+      "techniques": ["reliable_rag", "self_rag", "crag", "graph_rag_local_attribution", "local_rag_huggingface_faiss", "agentic_rag", "evaluation_deep_eval", "evaluation_grouse", "end-2-end_rag_evaluation", "open-rag-eval-example", "define_evaluation_metrics", "simple_rag", "simple_rag_with_llamaindex"]
+    },
+    {
+      "id": "fm-no-attribution",
+      "name": "Cannot trace answers to sources",
+      "description": "Users, auditors, or regulators cannot verify which exact passage supports each claim; citations are missing, wrong, or too coarse (whole-document instead of sentence-level).",
+      "example_phrasings": [
+        "I can't tell which sentence in my corpus supports this claim",
+        "Users don't trust answers because there's no visible evidence",
+        "The answer cites source [1] but I don't know if it really supports the claim"
+      ],
+      "techniques": ["reliable_rag", "explainable_retrieval", "graph_rag_local_attribution", "crag", "open-rag-eval-example", "local_rag_huggingface_faiss", "simple_rag", "simple_rag_with_llamaindex"]
+    },
+    {
+      "id": "fm-retrieval-opacity",
+      "name": "Retrieval is a black box",
+      "description": "Nobody can explain why the retriever returned what it did; debugging poor retrieval is guesswork because similarity scores carry no rationale.",
+      "example_phrasings": [
+        "I can't tell why these chunks were retrieved for my query",
+        "Debugging bad retrieval is pure guesswork",
+        "I need a visible trace of how the system got from query to evidence"
+      ],
+      "techniques": ["explainable_retrieval", "graph_rag", "graph_rag_local_attribution", "self_rag"]
+    },
+    {
+      "id": "fm-knowledge-gaps",
+      "name": "Out-of-scope questions, stale or conflicting knowledge",
+      "description": "The knowledge base doesn't cover the question, is outdated, or contains conflicting versions of the truth - and the system forces an answer instead of falling back, declining, or resolving the conflict.",
+      "example_phrasings": [
+        "Questions outside my document collection get made-up answers instead of a fallback",
+        "My knowledge base is outdated so answers about recent facts are stale",
+        "Old and new versions of documents conflict and the retriever can't be told which to trust"
+      ],
+      "techniques": ["crag", "self_rag", "agentic_rag", "evaluation_grouse"]
+    },
+    {
+      "id": "fm-cost-budget",
+      "name": "Token cost, latency, or context budget blown",
+      "description": "The pipeline spends too much per query: oversized contexts inflate cost and latency, retrieval fires even when unneeded, or per-query LLM calls make a good technique too slow.",
+      "example_phrasings": [
+        "Answers are slow because prompts are stuffed with oversized context",
+        "Query rewriting improved quality but made every query slower and more expensive",
+        "The system retrieves for every query, even chit-chat, adding noise and cost"
+      ],
+      "techniques": ["contextual_compression", "choose_chunk_size", "hype_hypothetical_prompt_embeddings", "self_rag", "relevant_segment_extraction", "proposition_chunking"]
+    },
+    {
+      "id": "fm-chunking-wrong",
+      "name": "Chunk size or boundaries wrong for the corpus",
+      "description": "Fixed-size splitting cuts mid-idea, blends unrelated topics into one embedding, or produces chunks too small/large for the workload - and no single setting fits heterogeneous documents.",
+      "example_phrasings": [
+        "Chunks blend two topics so embeddings are muddy",
+        "Chunk size was chosen by gut feeling with no evidence it fits",
+        "No chunk size works for both factoid lookups and section-level questions"
+      ],
+      "techniques": ["choose_chunk_size", "semantic_chunking", "proposition_chunking", "relevant_segment_extraction", "context_enrichment_window_around_chunk", "context_enrichment_window_around_chunk_with_llamaindex", "multi_model_rag_with_colpali"]
+    },
+    {
+      "id": "fm-doc-identity-lost",
+      "name": "Chunks lose document and section identity",
+      "description": "After splitting, chunks refer to their subject with pronouns or implicit references and don't encode which document/section they came from, so retrieval pulls similar-sounding chunks from the wrong document and the generator misreads them.",
+      "example_phrasings": [
+        "A chunk about my topic never names the entity so search skips it",
+        "Similar chunks from the wrong document pollute results in a multi-document corpus",
+        "Retrieved text says 'the company' and nobody knows which company"
+      ],
+      "techniques": ["contextual_chunk_headers", "hierarchical_indices", "proposition_chunking", "raptor", "agentic_rag"]
+    },
+    {
+      "id": "fm-structured-data",
+      "name": "Structured and tabular data doesn't fit document RAG",
+      "description": "The data is CSV rows, JSON records, or spreadsheets; naive text chunking splits records apart, drops column names, and mixes fields from different records.",
+      "example_phrasings": [
+        "My data is spreadsheets/JSON, not documents, and chunking mangles it",
+        "Retrieved values come back without their column names",
+        "Lookups about a specific record return pieces of several rows mixed together"
+      ],
+      "techniques": ["simple_csv_rag", "simple_csv_rag_with_llamaindex", "json_rag"]
+    },
+    {
+      "id": "fm-visual-content",
+      "name": "Answers live in figures, tables, and charts",
+      "description": "Critical content is visual - charts, diagrams, complex tables, scanned pages - which text extraction mangles or drops entirely, so it is invisible to the retriever.",
+      "example_phrasings": [
+        "Questions about a chart or table in a PDF get wrong or no answers",
+        "PDF text extraction ignores the images where the answer lives",
+        "My OCR/parsing pipeline keeps breaking on complex layouts"
+      ],
+      "techniques": ["multi_model_rag_with_captioning", "multi_model_rag_with_colpali", "agentic_rag"]
+    },
+    {
+      "id": "fm-privacy-local",
+      "name": "Data cannot leave local infrastructure",
+      "description": "Confidentiality, compliance, or cost rules forbid sending documents to cloud LLM/embedding APIs; the pipeline must run fully local or offline.",
+      "example_phrasings": [
+        "My documents are confidential and must not leave our servers",
+        "Per-token API billing makes my workload too expensive",
+        "I need RAG to work offline"
+      ],
+      "techniques": ["local_rag_huggingface_faiss", "graph_rag_local_attribution"]
+    },
+    {
+      "id": "fm-no-eval",
+      "name": "No way to measure quality or catch regressions",
+      "description": "There is no scoring harness: quality is judged by eyeballing outputs, changes to chunking/retrieval/prompts have no regression signal, and specific failure dimensions (completeness, faithfulness, relevancy) are invisible.",
+      "example_phrasings": [
+        "I changed my retriever and can't tell if it got better or worse",
+        "I have no ground-truth answers so I can't measure anything",
+        "One opaque quality score hides which dimension is failing"
+      ],
+      "techniques": ["evaluation_deep_eval", "evaluation_grouse", "end-2-end_rag_evaluation", "open-rag-eval-example", "define_evaluation_metrics", "choose_chunk_size", "agentic_rag"]
+    },
+    {
+      "id": "fm-judge-unvalidated",
+      "name": "The LLM judge itself is unreliable",
+      "description": "Evaluation relies on an LLM judge whose agreement with humans or a strong reference judge is unknown; cheap judges produce inconsistent, uncalibrated scores.",
+      "example_phrasings": [
+        "I use a cheap LLM as judge but have no idea if its grades are right",
+        "My one-shot judge prompt disagrees with human labels, especially on negatives",
+        "My evaluator is itself unevaluated"
+      ],
+      "techniques": ["evaluation_grouse", "end-2-end_rag_evaluation"]
+    },
+    {
+      "id": "fm-static-system",
+      "name": "System never learns from user feedback",
+      "description": "The pipeline keeps making the same mistakes: user ratings and past good answers are never folded back into retrieval or ranking.",
+      "example_phrasings": [
+        "The system gives the same bad answer even after users flag it",
+        "Retrieval never improves no matter how much feedback users give",
+        "Documents users consistently rate unhelpful keep ranking first"
+      ],
+      "techniques": ["retrieval_with_feedback_loop"]
+    }
+  ],
+  "techniques": {
+    "simple_rag": {
+      "stage": "retrieval",
+      "failure_mode_ids": ["fm-cold-start", "fm-hallucination", "fm-no-attribution"],
+      "related": [
+        {"target_slug": "simple_rag_with_llamaindex", "relation": "alternative_to"},
+        {"target_slug": "simple_csv_rag", "relation": "alternative_to"},
+        {"target_slug": "reranking", "relation": "prerequisite_of"},
+        {"target_slug": "contextual_compression", "relation": "prerequisite_of"},
+        {"target_slug": "self_rag", "relation": "prerequisite_of"},
+        {"target_slug": "crag", "relation": "prerequisite_of"},
+        {"target_slug": "retrieval_with_feedback_loop", "relation": "prerequisite_of"},
+        {"target_slug": "query_transformations", "relation": "composes_with"},
+        {"target_slug": "evaluation_deep_eval", "relation": "evaluated_by"},
+        {"target_slug": "end-2-end_rag_evaluation", "relation": "evaluated_by"}
+      ]
+    },
+    "simple_rag_with_llamaindex": {
+      "stage": "retrieval",
+      "failure_mode_ids": ["fm-cold-start", "fm-hallucination", "fm-no-attribution"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "alternative_to"},
+        {"target_slug": "reranking_with_llamaindex", "relation": "prerequisite_of"},
+        {"target_slug": "fusion_retrieval_with_llamaindex", "relation": "prerequisite_of"},
+        {"target_slug": "evaluation_deep_eval", "relation": "evaluated_by"}
+      ]
+    },
+    "simple_csv_rag": {
+      "stage": "indexing",
+      "failure_mode_ids": ["fm-structured-data", "fm-cold-start"],
+      "related": [
+        {"target_slug": "simple_csv_rag_with_llamaindex", "relation": "alternative_to"},
+        {"target_slug": "json_rag", "relation": "alternative_to"},
+        {"target_slug": "simple_rag", "relation": "alternative_to"},
+        {"target_slug": "reranking", "relation": "composes_with"},
+        {"target_slug": "reliable_rag", "relation": "composes_with"}
+      ]
+    },
+    "simple_csv_rag_with_llamaindex": {
+      "stage": "indexing",
+      "failure_mode_ids": ["fm-structured-data", "fm-cold-start"],
+      "related": [
+        {"target_slug": "simple_csv_rag", "relation": "alternative_to"},
+        {"target_slug": "json_rag", "relation": "alternative_to"},
+        {"target_slug": "reranking_with_llamaindex", "relation": "composes_with"},
+        {"target_slug": "query_transformations", "relation": "composes_with"}
+      ]
+    },
+    "json_rag": {
+      "stage": "indexing",
+      "failure_mode_ids": ["fm-structured-data", "fm-cold-start"],
+      "related": [
+        {"target_slug": "simple_csv_rag", "relation": "alternative_to"},
+        {"target_slug": "simple_rag", "relation": "alternative_to"},
+        {"target_slug": "fusion_retrieval", "relation": "composes_with"}
+      ]
+    },
+    "choose_chunk_size": {
+      "stage": "chunking",
+      "failure_mode_ids": ["fm-chunking-wrong", "fm-fragmented-context", "fm-context-noise", "fm-cost-budget", "fm-no-eval"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "semantic_chunking", "relation": "alternative_to"},
+        {"target_slug": "proposition_chunking", "relation": "alternative_to"},
+        {"target_slug": "relevant_segment_extraction", "relation": "alternative_to"},
+        {"target_slug": "context_enrichment_window_around_chunk", "relation": "composes_with"},
+        {"target_slug": "hyde_hypothetical_document_embedding", "relation": "composes_with"},
+        {"target_slug": "evaluation_deep_eval", "relation": "evaluated_by"}
+      ]
+    },
+    "semantic_chunking": {
+      "stage": "chunking",
+      "failure_mode_ids": ["fm-chunking-wrong", "fm-fragmented-context", "fm-context-noise"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "choose_chunk_size", "relation": "alternative_to"},
+        {"target_slug": "proposition_chunking", "relation": "alternative_to"},
+        {"target_slug": "context_enrichment_window_around_chunk", "relation": "alternative_to"},
+        {"target_slug": "contextual_chunk_headers", "relation": "composes_with"},
+        {"target_slug": "relevant_segment_extraction", "relation": "composes_with"},
+        {"target_slug": "contextual_compression", "relation": "composes_with"},
+        {"target_slug": "raptor", "relation": "composes_with"},
+        {"target_slug": "graph_rag", "relation": "composes_with"}
+      ]
+    },
+    "proposition_chunking": {
+      "stage": "chunking",
+      "failure_mode_ids": ["fm-chunking-wrong", "fm-context-noise", "fm-doc-identity-lost"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "choose_chunk_size", "relation": "alternative_to"},
+        {"target_slug": "semantic_chunking", "relation": "alternative_to"},
+        {"target_slug": "raptor", "relation": "alternative_to"},
+        {"target_slug": "hype_hypothetical_prompt_embeddings", "relation": "alternative_to"},
+        {"target_slug": "contextual_chunk_headers", "relation": "composes_with"},
+        {"target_slug": "context_enrichment_window_around_chunk", "relation": "composes_with"}
+      ]
+    },
+    "contextual_chunk_headers": {
+      "stage": "chunking",
+      "failure_mode_ids": ["fm-doc-identity-lost", "fm-vocab-mismatch", "fm-context-noise", "fm-hallucination"],
+      "related": [
+        {"target_slug": "relevant_segment_extraction", "relation": "composes_with"},
+        {"target_slug": "semantic_chunking", "relation": "composes_with"},
+        {"target_slug": "reranking", "relation": "composes_with"},
+        {"target_slug": "document_augmentation", "relation": "composes_with"},
+        {"target_slug": "contextual_compression", "relation": "composes_with"},
+        {"target_slug": "proposition_chunking", "relation": "alternative_to"},
+        {"target_slug": "context_enrichment_window_around_chunk", "relation": "alternative_to"},
+        {"target_slug": "hyde_hypothetical_document_embedding", "relation": "alternative_to"},
+        {"target_slug": "hierarchical_indices", "relation": "alternative_to"}
+      ]
+    },
+    "hype_hypothetical_prompt_embeddings": {
+      "stage": "indexing",
+      "failure_mode_ids": ["fm-vocab-mismatch", "fm-low-rank", "fm-cost-budget"],
+      "related": [
+        {"target_slug": "hyde_hypothetical_document_embedding", "relation": "alternative_to"},
+        {"target_slug": "query_transformations", "relation": "alternative_to"},
+        {"target_slug": "document_augmentation", "relation": "refines"},
+        {"target_slug": "reranking", "relation": "composes_with"},
+        {"target_slug": "choose_chunk_size", "relation": "composes_with"},
+        {"target_slug": "contextual_chunk_headers", "relation": "alternative_to"}
+      ]
+    },
+    "document_augmentation": {
+      "stage": "indexing",
+      "failure_mode_ids": ["fm-vocab-mismatch", "fm-low-rank"],
+      "related": [
+        {"target_slug": "hyde_hypothetical_document_embedding", "relation": "alternative_to"},
+        {"target_slug": "query_transformations", "relation": "alternative_to"},
+        {"target_slug": "proposition_chunking", "relation": "alternative_to"},
+        {"target_slug": "hierarchical_indices", "relation": "alternative_to"},
+        {"target_slug": "context_enrichment_window_around_chunk", "relation": "composes_with"},
+        {"target_slug": "contextual_chunk_headers", "relation": "composes_with"},
+        {"target_slug": "reranking", "relation": "composes_with"}
+      ]
+    },
+    "hierarchical_indices": {
+      "stage": "indexing",
+      "failure_mode_ids": ["fm-doc-identity-lost", "fm-context-noise", "fm-fragmented-context", "fm-global-synthesis"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "contextual_chunk_headers", "relation": "alternative_to"},
+        {"target_slug": "document_augmentation", "relation": "alternative_to"},
+        {"target_slug": "semantic_chunking", "relation": "composes_with"},
+        {"target_slug": "choose_chunk_size", "relation": "composes_with"},
+        {"target_slug": "reranking", "relation": "composes_with"}
+      ]
+    },
+    "raptor": {
+      "stage": "indexing",
+      "failure_mode_ids": ["fm-global-synthesis", "fm-multi-hop", "fm-fragmented-context", "fm-doc-identity-lost"],
+      "related": [
+        {"target_slug": "hierarchical_indices", "relation": "refines"},
+        {"target_slug": "graph_rag", "relation": "alternative_to"},
+        {"target_slug": "microsoft_graphrag", "relation": "alternative_to"},
+        {"target_slug": "memorag", "relation": "alternative_to"},
+        {"target_slug": "context_enrichment_window_around_chunk", "relation": "alternative_to"},
+        {"target_slug": "contextual_compression", "relation": "composes_with"},
+        {"target_slug": "semantic_chunking", "relation": "composes_with"},
+        {"target_slug": "reranking", "relation": "composes_with"}
+      ]
+    },
+    "microsoft_graphrag": {
+      "stage": "indexing",
+      "failure_mode_ids": ["fm-global-synthesis", "fm-multi-hop"],
+      "related": [
+        {"target_slug": "graph_rag", "relation": "alternative_to"},
+        {"target_slug": "graphrag_with_milvus_vectordb", "relation": "alternative_to"},
+        {"target_slug": "graph_rag_local_attribution", "relation": "alternative_to"},
+        {"target_slug": "raptor", "relation": "alternative_to"},
+        {"target_slug": "hierarchical_indices", "relation": "alternative_to"},
+        {"target_slug": "simple_rag", "relation": "refines"}
+      ]
+    },
+    "multi_model_rag_with_captioning": {
+      "stage": "indexing",
+      "failure_mode_ids": ["fm-visual-content"],
+      "related": [
+        {"target_slug": "multi_model_rag_with_colpali", "relation": "alternative_to"},
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "document_augmentation", "relation": "alternative_to"},
+        {"target_slug": "reranking", "relation": "composes_with"},
+        {"target_slug": "context_enrichment_window_around_chunk", "relation": "composes_with"},
+        {"target_slug": "contextual_chunk_headers", "relation": "composes_with"}
+      ]
+    },
+    "query_transformations": {
+      "stage": "query-transformation",
+      "failure_mode_ids": ["fm-vague-query", "fm-vocab-mismatch", "fm-multi-aspect", "fm-multi-hop"],
+      "related": [
+        {"target_slug": "hyde_hypothetical_document_embedding", "relation": "alternative_to"},
+        {"target_slug": "hype_hypothetical_prompt_embeddings", "relation": "alternative_to"},
+        {"target_slug": "graph_rag", "relation": "alternative_to"},
+        {"target_slug": "fusion_retrieval", "relation": "composes_with"},
+        {"target_slug": "reranking", "relation": "composes_with"},
+        {"target_slug": "adaptive_retrieval", "relation": "prerequisite_of"}
+      ]
+    },
+    "hyde_hypothetical_document_embedding": {
+      "stage": "query-transformation",
+      "failure_mode_ids": ["fm-vocab-mismatch", "fm-low-rank", "fm-multi-aspect"],
+      "related": [
+        {"target_slug": "hype_hypothetical_prompt_embeddings", "relation": "alternative_to"},
+        {"target_slug": "query_transformations", "relation": "alternative_to"},
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "fusion_retrieval", "relation": "composes_with"},
+        {"target_slug": "reranking", "relation": "composes_with"},
+        {"target_slug": "choose_chunk_size", "relation": "composes_with"}
+      ]
+    },
+    "memorag": {
+      "stage": "query-transformation",
+      "failure_mode_ids": ["fm-vague-query", "fm-global-synthesis", "fm-vocab-mismatch", "fm-multi-hop"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "query_transformations", "relation": "refines"},
+        {"target_slug": "hyde_hypothetical_document_embedding", "relation": "alternative_to"},
+        {"target_slug": "raptor", "relation": "alternative_to"},
+        {"target_slug": "graph_rag", "relation": "alternative_to"},
+        {"target_slug": "document_augmentation", "relation": "alternative_to"},
+        {"target_slug": "fusion_retrieval", "relation": "composes_with"},
+        {"target_slug": "contextual_compression", "relation": "composes_with"}
+      ]
+    },
+    "fusion_retrieval": {
+      "stage": "retrieval",
+      "failure_mode_ids": ["fm-exact-term-miss", "fm-vocab-mismatch", "fm-mixed-workload", "fm-low-rank"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "fusion_retrieval_with_llamaindex", "relation": "alternative_to"},
+        {"target_slug": "query_transformations", "relation": "alternative_to"},
+        {"target_slug": "hyde_hypothetical_document_embedding", "relation": "alternative_to"},
+        {"target_slug": "dartboard", "relation": "alternative_to"},
+        {"target_slug": "reranking", "relation": "composes_with"},
+        {"target_slug": "contextual_compression", "relation": "composes_with"}
+      ]
+    },
+    "fusion_retrieval_with_llamaindex": {
+      "stage": "retrieval",
+      "failure_mode_ids": ["fm-exact-term-miss", "fm-vocab-mismatch", "fm-mixed-workload", "fm-low-rank"],
+      "related": [
+        {"target_slug": "fusion_retrieval", "relation": "alternative_to"},
+        {"target_slug": "simple_rag_with_llamaindex", "relation": "refines"},
+        {"target_slug": "reranking_with_llamaindex", "relation": "composes_with"},
+        {"target_slug": "query_transformations", "relation": "composes_with"},
+        {"target_slug": "contextual_compression", "relation": "composes_with"}
+      ]
+    },
+    "dartboard": {
+      "stage": "retrieval",
+      "failure_mode_ids": ["fm-redundancy", "fm-multi-aspect", "fm-context-noise"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "reranking", "relation": "alternative_to"},
+        {"target_slug": "contextual_compression", "relation": "alternative_to"},
+        {"target_slug": "fusion_retrieval", "relation": "composes_with"}
+      ]
+    },
+    "adaptive_retrieval": {
+      "stage": "retrieval",
+      "failure_mode_ids": ["fm-mixed-workload", "fm-multi-aspect", "fm-redundancy", "fm-vague-query", "fm-context-noise"],
+      "related": [
+        {"target_slug": "query_transformations", "relation": "composes_with"},
+        {"target_slug": "reranking", "relation": "composes_with"},
+        {"target_slug": "fusion_retrieval", "relation": "composes_with"},
+        {"target_slug": "self_rag", "relation": "alternative_to"},
+        {"target_slug": "crag", "relation": "alternative_to"},
+        {"target_slug": "retrieval_with_feedback_loop", "relation": "alternative_to"},
+        {"target_slug": "hyde_hypothetical_document_embedding", "relation": "alternative_to"}
+      ]
+    },
+    "graph_rag": {
+      "stage": "retrieval",
+      "failure_mode_ids": ["fm-multi-hop", "fm-fragmented-context", "fm-retrieval-opacity", "fm-global-synthesis"],
+      "related": [
+        {"target_slug": "microsoft_graphrag", "relation": "alternative_to"},
+        {"target_slug": "graphrag_with_milvus_vectordb", "relation": "alternative_to"},
+        {"target_slug": "graph_rag_local_attribution", "relation": "alternative_to"},
+        {"target_slug": "raptor", "relation": "alternative_to"},
+        {"target_slug": "context_enrichment_window_around_chunk", "relation": "alternative_to"},
+        {"target_slug": "contextual_compression", "relation": "composes_with"},
+        {"target_slug": "semantic_chunking", "relation": "composes_with"},
+        {"target_slug": "explainable_retrieval", "relation": "composes_with"}
+      ]
+    },
+    "graph_rag_local_attribution": {
+      "stage": "retrieval",
+      "failure_mode_ids": ["fm-multi-hop", "fm-no-attribution", "fm-hallucination", "fm-privacy-local", "fm-retrieval-opacity"],
+      "related": [
+        {"target_slug": "graph_rag", "relation": "alternative_to"},
+        {"target_slug": "microsoft_graphrag", "relation": "alternative_to"},
+        {"target_slug": "raptor", "relation": "alternative_to"},
+        {"target_slug": "simple_rag", "relation": "alternative_to"},
+        {"target_slug": "fusion_retrieval", "relation": "refines"},
+        {"target_slug": "self_rag", "relation": "composes_with"},
+        {"target_slug": "crag", "relation": "composes_with"},
+        {"target_slug": "open-rag-eval-example", "relation": "evaluated_by"}
+      ]
+    },
+    "graphrag_with_milvus_vectordb": {
+      "stage": "retrieval",
+      "failure_mode_ids": ["fm-multi-hop", "fm-vocab-mismatch"],
+      "related": [
+        {"target_slug": "graph_rag", "relation": "alternative_to"},
+        {"target_slug": "microsoft_graphrag", "relation": "alternative_to"},
+        {"target_slug": "graph_rag_local_attribution", "relation": "alternative_to"},
+        {"target_slug": "raptor", "relation": "alternative_to"},
+        {"target_slug": "hyde_hypothetical_document_embedding", "relation": "alternative_to"},
+        {"target_slug": "reranking", "relation": "composes_with"},
+        {"target_slug": "simple_rag", "relation": "refines"}
+      ]
+    },
+    "multi_model_rag_with_colpali": {
+      "stage": "retrieval",
+      "failure_mode_ids": ["fm-visual-content", "fm-chunking-wrong"],
+      "related": [
+        {"target_slug": "multi_model_rag_with_captioning", "relation": "alternative_to"},
+        {"target_slug": "simple_rag", "relation": "alternative_to"},
+        {"target_slug": "semantic_chunking", "relation": "alternative_to"},
+        {"target_slug": "reranking", "relation": "composes_with"},
+        {"target_slug": "hyde_hypothetical_document_embedding", "relation": "composes_with"}
+      ]
+    },
+    "reranking": {
+      "stage": "post-retrieval",
+      "failure_mode_ids": ["fm-low-rank", "fm-context-noise", "fm-redundancy"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "reranking_with_llamaindex", "relation": "alternative_to"},
+        {"target_slug": "contextual_compression", "relation": "alternative_to"},
+        {"target_slug": "fusion_retrieval", "relation": "composes_with"},
+        {"target_slug": "query_transformations", "relation": "composes_with"},
+        {"target_slug": "hierarchical_indices", "relation": "composes_with"},
+        {"target_slug": "retrieval_with_feedback_loop", "relation": "composes_with"},
+        {"target_slug": "relevant_segment_extraction", "relation": "prerequisite_of"},
+        {"target_slug": "evaluation_deep_eval", "relation": "evaluated_by"}
+      ]
+    },
+    "reranking_with_llamaindex": {
+      "stage": "post-retrieval",
+      "failure_mode_ids": ["fm-low-rank", "fm-context-noise", "fm-redundancy"],
+      "related": [
+        {"target_slug": "reranking", "relation": "alternative_to"},
+        {"target_slug": "simple_rag_with_llamaindex", "relation": "refines"},
+        {"target_slug": "contextual_compression", "relation": "alternative_to"},
+        {"target_slug": "fusion_retrieval_with_llamaindex", "relation": "composes_with"},
+        {"target_slug": "hierarchical_indices", "relation": "composes_with"},
+        {"target_slug": "relevant_segment_extraction", "relation": "composes_with"},
+        {"target_slug": "hyde_hypothetical_document_embedding", "relation": "composes_with"}
+      ]
+    },
+    "contextual_compression": {
+      "stage": "post-retrieval",
+      "failure_mode_ids": ["fm-context-noise", "fm-cost-budget"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "reranking", "relation": "alternative_to"},
+        {"target_slug": "relevant_segment_extraction", "relation": "alternative_to"},
+        {"target_slug": "semantic_chunking", "relation": "alternative_to"},
+        {"target_slug": "hierarchical_indices", "relation": "alternative_to"},
+        {"target_slug": "context_enrichment_window_around_chunk", "relation": "composes_with"},
+        {"target_slug": "choose_chunk_size", "relation": "composes_with"}
+      ]
+    },
+    "context_enrichment_window_around_chunk": {
+      "stage": "post-retrieval",
+      "failure_mode_ids": ["fm-fragmented-context", "fm-chunking-wrong"],
+      "related": [
+        {"target_slug": "context_enrichment_window_around_chunk_with_llamaindex", "relation": "alternative_to"},
+        {"target_slug": "semantic_chunking", "relation": "alternative_to"},
+        {"target_slug": "proposition_chunking", "relation": "alternative_to"},
+        {"target_slug": "hierarchical_indices", "relation": "alternative_to"},
+        {"target_slug": "contextual_chunk_headers", "relation": "composes_with"},
+        {"target_slug": "choose_chunk_size", "relation": "composes_with"},
+        {"target_slug": "contextual_compression", "relation": "composes_with"},
+        {"target_slug": "reranking", "relation": "composes_with"}
+      ]
+    },
+    "context_enrichment_window_around_chunk_with_llamaindex": {
+      "stage": "post-retrieval",
+      "failure_mode_ids": ["fm-fragmented-context", "fm-chunking-wrong"],
+      "related": [
+        {"target_slug": "context_enrichment_window_around_chunk", "relation": "alternative_to"},
+        {"target_slug": "semantic_chunking", "relation": "alternative_to"},
+        {"target_slug": "relevant_segment_extraction", "relation": "alternative_to"},
+        {"target_slug": "hierarchical_indices", "relation": "alternative_to"},
+        {"target_slug": "contextual_chunk_headers", "relation": "composes_with"},
+        {"target_slug": "reranking_with_llamaindex", "relation": "composes_with"},
+        {"target_slug": "contextual_compression", "relation": "composes_with"}
+      ]
+    },
+    "relevant_segment_extraction": {
+      "stage": "post-retrieval",
+      "failure_mode_ids": ["fm-fragmented-context", "fm-chunking-wrong", "fm-cost-budget", "fm-context-noise"],
+      "related": [
+        {"target_slug": "context_enrichment_window_around_chunk", "relation": "refines"},
+        {"target_slug": "choose_chunk_size", "relation": "refines"},
+        {"target_slug": "semantic_chunking", "relation": "alternative_to"},
+        {"target_slug": "contextual_compression", "relation": "alternative_to"},
+        {"target_slug": "contextual_chunk_headers", "relation": "composes_with"},
+        {"target_slug": "reranking", "relation": "composes_with"}
+      ]
+    },
+    "reliable_rag": {
+      "stage": "post-retrieval",
+      "failure_mode_ids": ["fm-context-noise", "fm-hallucination", "fm-no-attribution"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "self_rag", "relation": "alternative_to"},
+        {"target_slug": "crag", "relation": "alternative_to"},
+        {"target_slug": "reranking", "relation": "alternative_to"},
+        {"target_slug": "relevant_segment_extraction", "relation": "composes_with"},
+        {"target_slug": "explainable_retrieval", "relation": "composes_with"},
+        {"target_slug": "retrieval_with_feedback_loop", "relation": "composes_with"},
+        {"target_slug": "evaluation_grouse", "relation": "evaluated_by"}
+      ]
+    },
+    "explainable_retrieval": {
+      "stage": "post-retrieval",
+      "failure_mode_ids": ["fm-retrieval-opacity", "fm-no-attribution", "fm-context-noise"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "reranking", "relation": "composes_with"},
+        {"target_slug": "contextual_compression", "relation": "composes_with"},
+        {"target_slug": "retrieval_with_feedback_loop", "relation": "composes_with"},
+        {"target_slug": "self_rag", "relation": "alternative_to"},
+        {"target_slug": "crag", "relation": "alternative_to"}
+      ]
+    },
+    "retrieval_with_feedback_loop": {
+      "stage": "post-retrieval",
+      "failure_mode_ids": ["fm-static-system", "fm-context-noise"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "reranking", "relation": "refines"},
+        {"target_slug": "adaptive_retrieval", "relation": "alternative_to"},
+        {"target_slug": "self_rag", "relation": "alternative_to"},
+        {"target_slug": "contextual_compression", "relation": "composes_with"},
+        {"target_slug": "evaluation_deep_eval", "relation": "composes_with"}
+      ]
+    },
+    "self_rag": {
+      "stage": "orchestration",
+      "failure_mode_ids": ["fm-hallucination", "fm-context-noise", "fm-knowledge-gaps", "fm-cost-budget", "fm-retrieval-opacity", "fm-mixed-workload"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "reliable_rag", "relation": "refines"},
+        {"target_slug": "crag", "relation": "alternative_to"},
+        {"target_slug": "adaptive_retrieval", "relation": "alternative_to"},
+        {"target_slug": "contextual_compression", "relation": "alternative_to"},
+        {"target_slug": "reranking", "relation": "composes_with"},
+        {"target_slug": "explainable_retrieval", "relation": "composes_with"},
+        {"target_slug": "open-rag-eval-example", "relation": "evaluated_by"}
+      ]
+    },
+    "crag": {
+      "stage": "orchestration",
+      "failure_mode_ids": ["fm-hallucination", "fm-knowledge-gaps", "fm-context-noise", "fm-no-attribution"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "refines"},
+        {"target_slug": "self_rag", "relation": "alternative_to"},
+        {"target_slug": "reliable_rag", "relation": "alternative_to"},
+        {"target_slug": "reranking", "relation": "alternative_to"},
+        {"target_slug": "agentic_rag", "relation": "alternative_to"},
+        {"target_slug": "query_transformations", "relation": "composes_with"},
+        {"target_slug": "contextual_compression", "relation": "composes_with"},
+        {"target_slug": "open-rag-eval-example", "relation": "evaluated_by"}
+      ]
+    },
+    "agentic_rag": {
+      "stage": "orchestration",
+      "failure_mode_ids": ["fm-vague-query", "fm-multi-hop", "fm-multi-aspect", "fm-visual-content", "fm-doc-identity-lost", "fm-knowledge-gaps", "fm-hallucination", "fm-no-eval"],
+      "related": [
+        {"target_slug": "query_transformations", "relation": "refines"},
+        {"target_slug": "reranking", "relation": "refines"},
+        {"target_slug": "self_rag", "relation": "alternative_to"},
+        {"target_slug": "crag", "relation": "alternative_to"},
+        {"target_slug": "adaptive_retrieval", "relation": "alternative_to"},
+        {"target_slug": "reliable_rag", "relation": "alternative_to"},
+        {"target_slug": "multi_model_rag_with_captioning", "relation": "alternative_to"},
+        {"target_slug": "hierarchical_indices", "relation": "alternative_to"},
+        {"target_slug": "evaluation_deep_eval", "relation": "evaluated_by"},
+        {"target_slug": "evaluation_grouse", "relation": "evaluated_by"}
+      ]
+    },
+    "local_rag_huggingface_faiss": {
+      "stage": "orchestration",
+      "failure_mode_ids": ["fm-privacy-local", "fm-cost-budget", "fm-cold-start", "fm-hallucination", "fm-no-attribution"],
+      "related": [
+        {"target_slug": "simple_rag", "relation": "alternative_to"},
+        {"target_slug": "simple_csv_rag", "relation": "alternative_to"},
+        {"target_slug": "graph_rag_local_attribution", "relation": "alternative_to"},
+        {"target_slug": "reranking", "relation": "composes_with"},
+        {"target_slug": "choose_chunk_size", "relation": "composes_with"},
+        {"target_slug": "contextual_compression", "relation": "composes_with"},
+        {"target_slug": "relevant_segment_extraction", "relation": "composes_with"}
+      ]
+    },
+    "define_evaluation_metrics": {
+      "stage": "evaluation",
+      "failure_mode_ids": ["fm-no-eval", "fm-hallucination"],
+      "related": [
+        {"target_slug": "evaluation_deep_eval", "relation": "alternative_to"},
+        {"target_slug": "evaluation_grouse", "relation": "alternative_to"},
+        {"target_slug": "open-rag-eval-example", "relation": "alternative_to"},
+        {"target_slug": "simple_rag", "relation": "composes_with"}
+      ]
+    },
+    "evaluation_deep_eval": {
+      "stage": "evaluation",
+      "failure_mode_ids": ["fm-no-eval", "fm-hallucination"],
+      "related": [
+        {"target_slug": "evaluation_grouse", "relation": "alternative_to"},
+        {"target_slug": "define_evaluation_metrics", "relation": "alternative_to"},
+        {"target_slug": "end-2-end_rag_evaluation", "relation": "alternative_to"},
+        {"target_slug": "open-rag-eval-example", "relation": "alternative_to"},
+        {"target_slug": "retrieval_with_feedback_loop", "relation": "composes_with"},
+        {"target_slug": "choose_chunk_size", "relation": "composes_with"}
+      ]
+    },
+    "evaluation_grouse": {
+      "stage": "evaluation",
+      "failure_mode_ids": ["fm-no-eval", "fm-hallucination", "fm-judge-unvalidated", "fm-knowledge-gaps"],
+      "related": [
+        {"target_slug": "evaluation_deep_eval", "relation": "alternative_to"},
+        {"target_slug": "end-2-end_rag_evaluation", "relation": "composes_with"},
+        {"target_slug": "reliable_rag", "relation": "composes_with"},
+        {"target_slug": "retrieval_with_feedback_loop", "relation": "composes_with"},
+        {"target_slug": "explainable_retrieval", "relation": "composes_with"}
+      ]
+    },
+    "end-2-end_rag_evaluation": {
+      "stage": "evaluation",
+      "failure_mode_ids": ["fm-no-eval", "fm-hallucination", "fm-judge-unvalidated"],
+      "related": [
+        {"target_slug": "define_evaluation_metrics", "relation": "refines"},
+        {"target_slug": "open-rag-eval-example", "relation": "alternative_to"},
+        {"target_slug": "evaluation_grouse", "relation": "alternative_to"},
+        {"target_slug": "evaluation_deep_eval", "relation": "alternative_to"},
+        {"target_slug": "self_rag", "relation": "composes_with"},
+        {"target_slug": "crag", "relation": "composes_with"}
+      ]
+    },
+    "open-rag-eval-example": {
+      "stage": "evaluation",
+      "failure_mode_ids": ["fm-no-eval", "fm-hallucination", "fm-no-attribution"],
+      "related": [
+        {"target_slug": "end-2-end_rag_evaluation", "relation": "alternative_to"},
+        {"target_slug": "evaluation_deep_eval", "relation": "alternative_to"},
+        {"target_slug": "define_evaluation_metrics", "relation": "alternative_to"},
+        {"target_slug": "self_rag", "relation": "composes_with"},
+        {"target_slug": "crag", "relation": "composes_with"},
+        {"target_slug": "reranking", "relation": "composes_with"}
+      ]
+    }
+  },
+  "categories": [
+    {
+      "readme_category": "Foundational RAG Techniques",
+      "mapped_stages": ["retrieval", "indexing", "chunking", "post-retrieval"],
+      "techniques": ["simple_rag", "simple_rag_with_llamaindex", "simple_csv_rag", "simple_csv_rag_with_llamaindex", "json_rag", "reliable_rag", "choose_chunk_size", "proposition_chunking"],
+      "notes": "The README's 'foundational' grab-bag spans four of our stages; reliable_rag is foundational per the README but functionally a post-retrieval validation layer."
+    },
+    {
+      "readme_category": "Query Enhancement",
+      "mapped_stages": ["query-transformation"],
+      "techniques": ["query_transformations", "hyde_hypothetical_document_embedding"]
+    },
+    {
+      "readme_category": "Context and Content Enrichment",
+      "mapped_stages": ["indexing", "chunking", "post-retrieval"],
+      "techniques": ["hype_hypothetical_prompt_embeddings", "contextual_chunk_headers", "relevant_segment_extraction", "context_enrichment_window_around_chunk", "context_enrichment_window_around_chunk_with_llamaindex", "semantic_chunking", "contextual_compression", "document_augmentation"],
+      "notes": "README itself is inconsistent here: its summary table files HyPE under Query Enhancement while its detailed list files it under Context Enrichment. We stage HyPE as indexing because its LLM cost is paid at index time."
+    },
+    {
+      "readme_category": "Advanced Retrieval Methods",
+      "mapped_stages": ["retrieval", "post-retrieval", "indexing"],
+      "techniques": ["fusion_retrieval", "fusion_retrieval_with_llamaindex", "reranking", "reranking_with_llamaindex", "hierarchical_indices", "dartboard", "multi_model_rag_with_captioning", "multi_model_rag_with_colpali"],
+      "notes": "The README also lists 'Multi-faceted Filtering' here, which has NO notebook in the repo (broken link); it is excluded from this ontology and all analyst references to it were dropped."
+    },
+    {
+      "readme_category": "Iterative and Adaptive Techniques",
+      "mapped_stages": ["post-retrieval", "retrieval"],
+      "techniques": ["retrieval_with_feedback_loop", "adaptive_retrieval"]
+    },
+    {
+      "readme_category": "Evaluation",
+      "mapped_stages": ["evaluation"],
+      "techniques": ["evaluation_deep_eval", "evaluation_grouse", "end-2-end_rag_evaluation", "open-rag-eval-example", "define_evaluation_metrics"],
+      "notes": "define_evaluation_metrics exists in the repo but is absent from the README."
+    },
+    {
+      "readme_category": "Memory-Augmented Retrieval",
+      "mapped_stages": ["query-transformation"],
+      "techniques": ["memorag"]
+    },
+    {
+      "readme_category": "Explainability and Transparency",
+      "mapped_stages": ["post-retrieval"],
+      "techniques": ["explainable_retrieval"]
+    },
+    {
+      "readme_category": "Advanced Architectures",
+      "mapped_stages": ["orchestration", "retrieval", "indexing"],
+      "techniques": ["agentic_rag", "graphrag_with_milvus_vectordb", "graph_rag", "microsoft_graphrag", "raptor", "self_rag", "crag", "graph_rag_local_attribution"]
+    },
+    {
+      "readme_category": "Special Advanced Technique",
+      "mapped_stages": ["orchestration"],
+      "techniques": [],
+      "notes": "The 'Sophisticated Controllable Agent' is an external repo (NirDiamant/Controllable-RAG-Agent) with no notebook here; excluded."
+    },
+    {
+      "readme_category": "(absent from README)",
+      "mapped_stages": ["orchestration"],
+      "techniques": ["local_rag_huggingface_faiss"],
+      "notes": "Present in the repo but undocumented in the README."
+    }
+  ]
+}

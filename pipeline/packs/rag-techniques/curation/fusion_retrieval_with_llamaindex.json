@@ -1,0 +1,80 @@
+{
+  "slug": "fusion_retrieval_with_llamaindex",
+  "title": "Fusion Retrieval (Hybrid BM25 + Vector) with LlamaIndex",
+  "one_liner": "Combines FAISS vector similarity search and BM25 keyword retrieval in a single weighted, score-normalized retriever using LlamaIndex's QueryFusionRetriever.",
+  "stage": "retrieval",
+  "problem_solved": "Pure vector search misses exact keyword/term matches (names, codes, rare jargon) while pure BM25 misses semantically related passages phrased differently from the query; fusing both retrievers with normalized, weighted scores retrieves relevant chunks that either method alone would rank too low.",
+  "failure_modes": [
+    "Semantic search returns conceptually related chunks but misses documents containing the exact term, name, acronym, or identifier I searched for",
+    "Keyword search fails when the query is paraphrased or uses different vocabulary than the corpus (vocabulary mismatch)",
+    "Retrieval quality is inconsistent across query types — some queries need exact matching, others need semantic understanding",
+    "Rare or domain-specific terms are poorly represented in the embedding space, so embedding-only retrieval ranks them badly",
+    "Relevant chunks exist in the index but never reach the top-k because a single retrieval signal ranks them too low"
+  ],
+  "when_to_use": [
+    "Your corpus mixes natural prose with exact-match-critical tokens: product codes, statute numbers, API names, chemical names, people/org names",
+    "Users issue both keyword-style lookups and natural-language questions against the same index",
+    "You already use LlamaIndex and want hybrid retrieval without adding an external hybrid-capable search engine (Elasticsearch, Weaviate hybrid, etc.)",
+    "Embedding-only retrieval evaluations show misses on queries containing rare or out-of-vocabulary terms",
+    "Legal, academic, medical, or technical document search where both conceptual similarity and literal term presence matter",
+    "You want a tunable dial (retriever_weights) to bias toward semantic vs. lexical matching per use case"
+  ],
+  "tradeoffs": [
+    "Two indexes to build and keep in sync (FAISS vector store + BM25 index) — roughly doubles index build/maintenance and memory footprint",
+    "Two retrieval passes per query instead of one, adding latency (mitigable with use_async=True)",
+    "Score fusion mode matters: BM25 and cosine/L2 scores live on different scales, so reciprocal_rerank or unnormalized combination behaves poorly; the notebook uses dist_based_score (mean/std MinMax normalization) — choosing the wrong mode silently degrades results",
+    "retriever_weights (0.6 vector / 0.4 BM25 here) are hand-tuned magic numbers; optimal values are corpus- and query-distribution-dependent and need evaluation to set",
+    "In-memory BM25Retriever (from llama_index.legacy) does not scale to very large corpora the way a dedicated search engine does",
+    "Skip it if your queries are uniformly semantic (e.g., conversational Q&A over homogeneous prose) or uniformly lexical — a single well-tuned retriever is simpler and cheaper",
+    "No extra LLM calls at retrieval time when num_queries=1, but raising num_queries adds query-generation LLM calls per request"
+  ],
+  "how_it_works": "A PDF is loaded with SimpleDirectoryReader and pushed through a LlamaIndex IngestionPipeline that applies SentenceSplitter chunking plus a custom TextCleaner TransformComponent (strips tabs/newline clutter), writing embeddings (OpenAI text-embedding-3-small, 512 dims) into a FAISS IndexFlatL2 vector store. The same nodes also feed an in-memory BM25Retriever. Both retrievers (each similarity_top_k=2) are wrapped in a QueryFusionRetriever with retriever_weights=[0.6, 0.4], num_queries=1 (disabling LLM query generation — pure fusion, not RAG-Fusion), use_async=False, and mode='dist_based_score': each retriever's scores are MinMax-normalized using mean±3·std bounds, scaled to [0,1], weighted, and merged into a single ranked list. The notebook documents the four fusion modes (reciprocal_rerank, relative_score, dist_based_score, simple) and notes reciprocal_rerank is unsuitable here because the two retrievers return scores on different scales. Retrieval is demonstrated with a climate-change query, printing fused nodes with scores. Although fusion happens at query time (retrieval stage), the technique also requires an indexing-stage commitment to building both indexes; setting num_queries>1 would extend it into query-transformation territory.",
+  "key_dependencies": [
+    "llama-index (core: Settings, SimpleDirectoryReader, SentenceSplitter, IngestionPipeline, VectorStoreIndex, QueryFusionRetriever)",
+    "llama-index.legacy (BM25Retriever)",
+    "faiss-cpu (IndexFlatL2)",
+    "llama-index-vector-stores-faiss (FaissVectorStore)",
+    "OpenAI API (text-embedding-3-small embeddings; gpt-3.5-turbo set as Settings.llm)",
+    "python-dotenv"
+  ],
+  "key_code_signals": [
+    "QueryFusionRetriever(retrievers=[vector_retriever, bm25_retriever], retriever_weights=[0.6, 0.4], num_queries=1, mode='dist_based_score')",
+    "BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=2) from llama_index.legacy.retrievers.bm25_retriever",
+    "faiss.IndexFlatL2(EMBED_DIMENSION) wrapped in FaissVectorStore",
+    "IngestionPipeline(transformations=[SentenceSplitter(), TextCleaner()], vector_store=vector_store, documents=documents)",
+    "custom TextCleaner(TransformComponent) node-cleaning transform",
+    "VectorStoreIndex(nodes).as_retriever(similarity_top_k=2)",
+    "Settings.embed_model = OpenAIEmbedding(model='text-embedding-3-small', dimensions=512)"
+  ],
+  "related_techniques": [
+    "fusion_retrieval: alternative (same hybrid BM25+vector technique implemented in LangChain with rank_bm25 instead of LlamaIndex)",
+    "reranking: composes-with (a cross-encoder/LLM reranker can re-order the fused candidate pool for higher precision)",
+    "query_transformations: extends (setting num_queries>1 in QueryFusionRetriever adds LLM multi-query generation, turning this into RAG-Fusion)",
+    "simple_rag: refines (drop-in upgrade of the retrieval step in a baseline vector-only RAG pipeline)",
+    "contextual_compression: composes-with (compress/filter the fused results before generation)",
+    "multi_faceted_filtering: composes-with (metadata/score filtering can further prune the fused candidate set)"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "hybrid search",
+    "fusion retrieval",
+    "BM25",
+    "keyword search",
+    "sparse retrieval",
+    "dense retrieval",
+    "vector search misses exact match",
+    "combine bm25 and embeddings",
+    "QueryFusionRetriever",
+    "LlamaIndex hybrid retriever",
+    "FAISS",
+    "score normalization",
+    "reciprocal rank fusion",
+    "dist_based_score",
+    "retriever weights",
+    "lexical vs semantic search",
+    "exact term matching RAG"
+  ],
+  "summary": "Fusion retrieval fixes the complementary blind spots of dense and sparse retrieval: embedding-based vector search misses exact keywords, names, codes, and rare domain terms, while BM25 keyword search fails on paraphrased queries with vocabulary mismatch. This LlamaIndex implementation chunks a PDF via an IngestionPipeline (SentenceSplitter plus a custom TextCleaner transform), indexes the same nodes twice — OpenAI text-embedding-3-small vectors in a FAISS IndexFlatL2 store and an in-memory BM25 index — then merges both retrievers with QueryFusionRetriever using retriever_weights=[0.6, 0.4] and mode='dist_based_score', which MinMax-normalizes each retriever's scores using mean±3·std before weighted merging (necessary because BM25 and vector scores are on different scales; reciprocal rank fusion is noted as unsuitable). num_queries=1 disables LLM query generation, so no extra LLM calls occur at query time. Costs: dual index build/maintenance, two retrieval passes per query, and hand-tuned weights requiring evaluation. Best for corpora mixing prose with exact-match-critical tokens (legal, technical, academic search) and mixed keyword/natural-language query traffic.",
+  "notes_for_chunking": "Well-structured, small notebook (~27 cells). Cell 0 is a book advertisement — strip it. Cell 1 is a single long markdown overview covering Overview/Motivation/Key Components/Method Details/Benefits/Conclusion under one H1 — it is self-contained and chunkable as one unit or split on its H2s. Remaining cells follow a clean pattern of short H3 markdown headers (Read Docs, Create Vector Store, Text Cleaner Transformation, Ingestion Pipeline, BM25 Retriever, Vector Retriever, Fusing Both Retrievers, Use Case example) each followed by one small code cell — header+code pairs make natural chunks. One valuable markdown cell after the QueryFusionRetriever code explains the num_queries and mode parameters with LaTeX math — keep it attached to the fusion code cell, as it is the conceptual core. Junk to strip: pip install cell, wget data-download cell, the tracking-pixel image in the final markdown cell, and the trivial print-results loop. Markdown/code ratio is high and headers are reliable; no giant outputs or base64 blobs present.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/fusion_retrieval_with_llamaindex.json"
+}

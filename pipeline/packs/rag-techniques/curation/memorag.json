@@ -1,0 +1,84 @@
+{
+  "slug": "memorag",
+  "title": "MemoRAG: Memory-Augmented Retrieval-Augmented Generation",
+  "one_liner": "Builds an LLM-generated 'memory' (topic->details key-value pairs) over the whole corpus at index time, then at query time mines that memory for clue spans and surrogate queries that replace the raw user query for retrieval.",
+  "stage": "query-transformation",
+  "problem_solved": "Standard RAG fails on vague, implicit, or high-level questions (e.g. 'summarize this article', 'describe the relationships between the main characters') because embedding/lexical similarity between the raw query and individual chunks finds nothing useful, especially over long unstructured documents like books. MemoRAG adds a global-memory layer: a compressed key-value representation of the entire corpus that the system consults first to generate concrete, evidence-seeking retrieval queries ('staging answers') that actually match corpus wording, before running normal vector retrieval.",
+  "failure_modes": [
+    "My question is vague or high-level and the retriever brings back irrelevant chunks because nothing in the corpus literally matches my wording",
+    "Questions that need a global understanding of a whole long document (themes, summaries, relationships) can't be answered by any single retrieved chunk",
+    "Query vocabulary mismatches corpus vocabulary, so semantic search misses the passages that actually contain the answer",
+    "Evidence for one question is scattered across many sections of a very long document (a 600-page book) and top-k retrieval on the raw query only finds one fragment",
+    "Ambiguous or implicit information needs: the user doesn't know how to phrase the question in terms the documents use"
+  ],
+  "when_to_use": [
+    "Your corpus is one or a few very long unstructured documents (novels, textbooks, 600-page reports) rather than many short self-contained articles",
+    "Users ask thematic, summary-style, or relationship questions, not just factoid lookups",
+    "The corpus is static and queried many times, so the expensive one-time memory build amortizes (the notebook explicitly persists the memory FAISS store for reuse)",
+    "Plain similarity search on the raw query demonstrably retrieves off-topic chunks and query rewriting alone hasn't helped",
+    "You want a lighter-weight alternative to the original GPU-bound MemoRAG memory models: this notebook approximates the paper's KV-cache memory with gpt-4o-mini JSON extraction plus a second FAISS index"
+  ],
+  "tradeoffs": [
+    "Expensive one-time memory build: an LLM pass over the entire corpus to extract key-value pairs (the notebook warns it 'might run for a long time and take quite a lot of the tokens credit' and comments the cells out)",
+    "Every query costs 3+ extra LLM calls: memory similarity search feeds two gpt-4o-mini calls (clue spans + surrogate questions) before retrieval and one more for generation, adding latency and cost",
+    "Multi-query fan-out (each generated clue/surrogate query retrieves k=3 chunks) inflates the context window and can pull in noise despite deduplication",
+    "Two indexes to build, persist, and keep in sync: the memory FAISS store and the document chunk FAISS store; memory goes stale when documents change",
+    "Overkill for short documents and direct factoid QA where simple RAG already retrieves the right chunk",
+    "This is a from-scratch approximation, not the paper's trained memory model (memorag-qwen2-7b-inst / memorag-mistral-7b-inst); the original implementation required a Colab A100 and its answers are only imported as hard-coded strings for comparison",
+    "Memory quality depends entirely on the KV-extraction prompt; JSON parse failures fall back to brittle line-based text parsing"
+  ],
+  "how_it_works": "Two phases. Index time (indexing stage): the document is loaded (PyPDFLoader), and the MemoryStore.memorize() method sends the text (or 50k-char chunks for long books) to gpt-4o-mini with response_format json_object, prompting it to extract topic->details key-value pairs that 'mimic kv cache memory creation'. Pairs are validated with Pydantic (MemoryResponse/KeyValuePair), deduplicated by topic, embedded with OpenAIEmbeddings, and stored in a dedicated FAISS memory index that is saved to disk for reuse. Separately, the raw document is chunked normally (encode_pdf, chunk_size=1000, overlap=200) into the main document vectorstore. Query time (query-transformation, the dominant stage): create_retrieval_queries() similarity-searches the memory index (k=10) for relevant topic-detail pairs, then makes two LLM calls over that memory context: one extracts clue text spans likely to appear in the article, the other generates surrogate clarifying questions. Spans + surrogates (filtered to >3 words) + the original query form a multi-query set; each is run against the document vectorstore (k=3), results are order-preserving deduplicated, and gpt-4o-mini generates a grounded answer from the merged context. The notebook closes with a deepeval-based comparison (correctness, faithfulness, relevance) of Simple RAG vs this MemoRAG on a short climate PDF and the full 'Wealth of Nations', plus imported results from the original paper implementation.",
+  "key_dependencies": [
+    "openai (OpenAI client, gpt-4o-mini for memory extraction, query generation, and answering)",
+    "langchain_community (OpenAIEmbeddings, FAISS vector stores, PyPDFLoader, RecursiveCharacterTextSplitter via helper_functions)",
+    "faiss (two indexes: memory store and document chunk store)",
+    "pydantic (KeyValuePair/MemoryResponse schema validation of extracted memory)",
+    "deepeval via the repo's evaluation/evalute_rag helpers (correctness, faithfulness, relevance metrics)",
+    "pandas (loading original-MemoRAG retrieved passages from CSV)",
+    "python-dotenv, repo-local helper_functions (encode_pdf)"
+  ],
+  "key_code_signals": [
+    "class MemoryStore with memorize() calling client.chat.completions.create(model='gpt-4o-mini', response_format={'type': 'json_object'}) to extract topic/details pairs",
+    "Pydantic models KeyValuePair(topic, details) and MemoryResponse(pairs) validating the extracted memory",
+    "FAISS.from_texts(...) building a second, memory-only vector index separate from the document vectorstore, with save_store/load_store persistence",
+    "memorag_span_prompt_for_queries_creation and memorag_sur_prompt_for_queries_creation: twin prompts producing clue text spans and surrogate questions from memory",
+    "create_retrieval_queries(): retrieval_query = text_spans.split('\\n') + surrogate_queries.split('\\n') + [original query], filtered to >3 words",
+    "process_query(): loops retrieve_context() over every generated query (k=3 each) then dedups with list(dict.fromkeys(all_contexts))",
+    "encode_pdf(path, chunk_size=1000, chunk_overlap=200) for the standard document chunk index",
+    "evaluate_memo_rag(...) vs evaluate_rag(...) head-to-head deepeval comparison on short and ~600-page corpora"
+  ],
+  "related_techniques": [
+    "simple-rag: baseline it is explicitly benchmarked against in-notebook",
+    "query-transformations: refines (memory-grounded multi-query generation instead of blind rewriting/decomposition)",
+    "hyde-hypothetical-document-embedding: alternative (HyDE hallucinates a pseudo-document from the query alone; MemoRAG grounds its surrogate queries in an actual corpus memory)",
+    "raptor: alternative for global/long-document understanding (hierarchical summary tree vs flat KV memory)",
+    "graph-rag: alternative for relationship/holistic queries over unstructured corpora",
+    "fusion-retrieval / multi-query: composes-with (the generated clue set is executed as parallel retrievals whose results are merged)",
+    "document-augmentation: related index-time idea (enriching the index with LLM-generated questions vs building a separate memory index)",
+    "contextual-compression: complementary post-retrieval step to trim the enlarged multi-query context"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "memorag",
+    "memory-augmented retrieval",
+    "global memory",
+    "kv cache memory",
+    "surrogate queries",
+    "clue generation",
+    "staging answers",
+    "long document QA",
+    "book question answering",
+    "vague query",
+    "implicit information need",
+    "ambiguous question",
+    "summary question",
+    "query rewriting",
+    "multi-query retrieval",
+    "long context",
+    "faiss",
+    "gpt-4o-mini",
+    "deepeval"
+  ],
+  "summary": "MemoRAG targets the failure where vague, implicit, or globally-scoped questions (summaries, themes, character relationships) retrieve nothing useful because the raw query doesn't semantically match any single chunk, especially in long unstructured documents like books. It adds a memory layer built once at index time: an LLM (gpt-4o-mini here, approximating the paper's KV-cache memory models) reads the whole corpus and extracts topic->details key-value pairs, which are embedded into a dedicated FAISS memory index and persisted to disk. At query time the memory is searched first, and two LLM calls turn the relevant memories into clue text spans and surrogate questions; these staging queries, plus the original question, drive multi-query retrieval against the normal chunk vectorstore, with deduplicated results fed to a grounded generator. The notebook benchmarks it against simple RAG with deepeval (correctness, faithfulness, relevance) on a short climate PDF and the 600-page 'Wealth of Nations'. Costs: an expensive full-corpus LLM memorization pass, two indexes to maintain, and 3+ extra LLM calls per query. Best for static long corpora queried repeatedly with high-level questions; overkill for factoid QA over short documents.",
+  "notes_for_chunking": "Structure: one very large front-loaded markdown cell contains the entire conceptual writeup (Overview, Motivation, Key Components, Method Details, Benefits, Conclusion) with internal ## headers inside a single cell plus an HTML <div> title block; a chunker should split this cell on its internal headers rather than treating it as one blob. An <img> HTML cell (../images/memo_rag.svg) follows and is strippable. The implementation section has clean ### headers (Imports, OpenAI Setup, Memory Module Classes, Retrieval Function, Generation Function, Query Processing Function, Initialize Components, Usage Examples) with short 1-2 line connective markdown before each code cell; prompt templates live in standalone string-assignment cells and are highly self-contained. One ~150-line MemoryStore class cell should not be split mid-class. No pip-install cell and no stored outputs or base64 junk, but `from helper_functions import *` and `from evaluation.evalute_rag import *` hide dependencies (FAISS, json, BaseModel, evaluate_rag come from wildcard imports). Junk to downweight: commented-out memorize/save cells, and a long hard-coded Python list of 16 original-MemoRAG answer strings plus a CSV-loading cell near the end, which are evaluation data rather than technique content. Markdown/code ratio is roughly 40/60; evaluation section (evaluate_memo_rag) is self-contained and separable from the core pipeline."
+}

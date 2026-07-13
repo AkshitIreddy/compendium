@@ -1,0 +1,86 @@
+{
+  "slug": "graph_rag",
+  "title": "Graph RAG with LangChain (chunk-graph traversal)",
+  "one_liner": "Builds a NetworkX knowledge graph over document chunks (embedding similarity + LLM-extracted shared concepts) and answers queries by Dijkstra-like graph traversal with per-step LLM completeness checks instead of flat top-k retrieval.",
+  "stage": "retrieval",
+  "problem_solved": "Flat vector retrieval returns k isolated chunks and cannot connect related facts scattered across a document, so multi-hop questions and context-dependent answers fail. This technique replaces fixed top-k with an adaptive graph traversal that starts from the most relevant chunks and expands context along the strongest chunk-to-chunk relationships until an LLM judges the accumulated context sufficient to answer.",
+  "failure_modes": [
+    "My question needs facts from several different parts of the document connected together (multi-hop reasoning), but top-k retrieval only returns disconnected pieces",
+    "Retrieved chunks are relevant but lack the related surrounding information needed to actually answer",
+    "Fixed top-k retrieves too little context for hard questions and too much irrelevant context for easy ones — I want retrieval that stops when the answer is complete",
+    "Relationships between concepts across a long document are lost when chunks are treated independently",
+    "I can't explain or debug why the system retrieved what it did — I want a visible retrieval path"
+  ],
+  "when_to_use": [
+    "Your documents are long, interlinked reports where answering requires combining information from multiple related sections",
+    "Users ask multi-hop or synthesis questions ('how does X relate to Y?') that single-chunk retrieval consistently fails",
+    "You want adaptive context expansion: keep pulling in connected chunks until an LLM says the answer is complete, rather than a fixed k",
+    "You need explainability — the traversal path over the graph can be visualized to show exactly which chunks were used and in what order",
+    "Your corpus is small-to-medium (hundreds to low thousands of chunks) so the O(n^2) edge construction and per-chunk LLM concept extraction are affordable",
+    "You want a self-contained, framework-light graph RAG (LangChain + NetworkX + FAISS) without adopting a heavy system like Microsoft GraphRAG or a graph database"
+  ],
+  "tradeoffs": [
+    "Expensive index build: one LLM structured-output call per chunk for concept extraction (mitigated by caching and ThreadPoolExecutor, but still linear in corpus size) plus O(n^2) pairwise cosine similarity for edge creation — does not scale to large corpora",
+    "Expensive queries: an LLM 'is the answer complete?' check runs after every traversed node, and the entry-point retrieval uses LLMChainExtractor contextual compression (one more LLM call per candidate doc) — many LLM calls and high latency per query",
+    "The graph is an in-memory NetworkX object with no persistence, incremental update, or graph-database backing — a prototype architecture, not production infrastructure",
+    "Nodes are text chunks, not entities; edges are similarity/shared-concept links, not typed relations — this is weaker than a true entity-relationship knowledge graph for precise relational queries (Microsoft GraphRAG or triplet-based approaches fit that better)",
+    "Similarity threshold (0.8), edge-weight mix (alpha=0.7/beta=0.3), and max_context_length (4000) are hand-tuned magic numbers that need re-tuning per corpus",
+    "Traversal adds every relaxed neighbor's content to the context immediately, so weakly related chunks can leak into the context window",
+    "Overkill for simple factoid QA over small or homogeneous corpora — plain vector RAG is cheaper, faster, and usually sufficient"
+  ],
+  "how_it_works": "Indexing (secondary stage): documents are loaded (PyPDFLoader), split with RecursiveCharacterTextSplitter (chunk_size=1000, overlap=200), embedded with OpenAIEmbeddings, and stored in FAISS. A NetworkX Graph is built where each chunk becomes a node; for every chunk, named entities are extracted with spaCy (en_core_web_sm, PERSON/ORG/GPE/WORK_OF_ART) and general concepts with gpt-4o-mini via with_structured_output(Concepts), cached and parallelized with ThreadPoolExecutor. Edges are added between chunk pairs whose embedding cosine similarity exceeds 0.8, with weight = 0.7*similarity + 0.3*normalized shared-concept overlap (concepts lemmatized via WordNetLemmatizer for matching). Query time (primary stage): the query hits a FAISS retriever (k=5) wrapped in ContextualCompressionRetriever + LLMChainExtractor to get entry documents; their graph nodes seed a heapq priority queue with priority 1/similarity. A Dijkstra-like loop pops the strongest node, appends its content to the context, and runs an AnswerCheck structured-output LLM call — if the context now fully answers the query, traversal stops and returns that answer; otherwise neighbors are relaxed by 1/edge_weight, guided by a visited-concepts set so exploration favors new concepts. If the queue empties without a complete answer, gpt-4o-mini generates a final answer from the accumulated context. A Visualizer renders the graph and the traversal path (matplotlib) for explainability, and get_openai_callback reports token cost per query.",
+  "key_dependencies": [
+    "langchain (FAISS vectorstore, RecursiveCharacterTextSplitter, PromptTemplate, ContextualCompressionRetriever, LLMChainExtractor, get_openai_callback)",
+    "langchain-openai (ChatOpenAI gpt-4o-mini, OpenAIEmbeddings via helper_functions)",
+    "networkx (knowledge graph)",
+    "faiss-cpu (vector index)",
+    "spacy (en_core_web_sm NER)",
+    "nltk (WordNetLemmatizer, word_tokenize)",
+    "scikit-learn (cosine_similarity)",
+    "matplotlib (graph/traversal visualization)",
+    "numpy, tqdm, concurrent.futures (ThreadPoolExecutor), python-dotenv",
+    "OpenAI API key required"
+  ],
+  "key_code_signals": [
+    "self.graph = nx.Graph() with graph.add_node(i, content=split.page_content) — nodes are chunks, not entities",
+    "concept_chain = concept_extraction_prompt | llm.with_structured_output(Concepts) — per-chunk LLM concept extraction (plus spaCy doc.ents NER)",
+    "cosine_similarity(embeddings) with self.edges_threshold = 0.8 gating graph.add_edge(...)",
+    "_calculate_edge_weight(..., alpha=0.7, beta=0.3) — edge weight blends embedding similarity and shared-concept overlap",
+    "heapq priority queue in QueryEngine._expand_context with priority = 1/similarity and relaxation distance = current_priority + 1/edge_weight (Dijkstra-like traversal)",
+    "answer_check_prompt | self.llm.with_structured_output(AnswerCheck) — per-node LLM completeness check for early stopping",
+    "ContextualCompressionRetriever(base_compressor=LLMChainExtractor.from_llm(llm), base_retriever=FAISS.as_retriever(k=5)) — entry-point retrieval",
+    "Visualizer.visualize_traversal(graph, traversal_path) — matplotlib rendering of the traversal path"
+  ],
+  "related_techniques": [
+    "Microsoft_GraphRag: alternative — entity/community-based graph RAG product vs this hand-rolled chunk-graph",
+    "graphrag_with_milvus_vectordb: alternative — stores subject-predicate-object triplets in Milvus for relationship retrieval instead of an in-memory chunk graph",
+    "graph_rag_local_attribution: refinement/alternative — local (Ollama) graph RAG with sentence-level verifiable attribution",
+    "raptor: alternative — hierarchical summary tree instead of a similarity graph for cross-chunk context",
+    "contextual_compression: composed within — the query engine uses ContextualCompressionRetriever/LLMChainExtractor for entry-point retrieval",
+    "context_enrichment_window_around_chunk: lighter alternative — expands context by neighboring sentences instead of graph traversal",
+    "semantic_chunking: complementary — better chunk boundaries would improve graph node quality",
+    "explainable_retrieval: related goal — this technique's traversal visualization provides retrieval explainability",
+    "adaptive_retrieval: related idea — both adapt retrieval effort to the query instead of fixed top-k"
+  ],
+  "complexity": "high",
+  "keywords": [
+    "graph rag",
+    "knowledge graph retrieval",
+    "multi-hop question answering",
+    "graph traversal rag",
+    "networkx rag",
+    "chunk relationship graph",
+    "concept extraction",
+    "dijkstra retrieval",
+    "adaptive context expansion",
+    "connected information retrieval",
+    "explainable retrieval path",
+    "entity extraction spacy",
+    "context spans multiple chunks",
+    "langchain graph rag",
+    "priority queue traversal"
+  ],
+  "summary": "Graph RAG (LangChain/NetworkX implementation) targets questions standard vector RAG fails: answers whose facts are scattered across multiple related chunks and need multi-hop connection, and fixed top-k retrieval that returns isolated, insufficient context. At index time, documents are split (RecursiveCharacterTextSplitter 1000/200), embedded (OpenAIEmbeddings) into FAISS, and a NetworkX graph is built with chunks as nodes; each chunk gets concepts via spaCy NER plus gpt-4o-mini structured-output extraction, and edges connect chunk pairs whose cosine similarity exceeds 0.8, weighted 0.7*similarity + 0.3*shared-concept overlap. At query time, entry nodes come from FAISS retrieval refined by LLMChainExtractor contextual compression; a Dijkstra-like priority-queue traversal expands context along the strongest edges, running an LLM 'is the answer complete?' check after each node to stop early, and falls back to LLM generation over accumulated context. Traversal paths are visualized with matplotlib for explainability. Costs: per-chunk LLM extraction at build, O(n^2) edge computation, and many LLM calls per query; the in-memory graph suits small/medium corpora and prototyping, not production scale.",
+  "notes_for_chunking": "Structure: one giant, well-organized markdown overview cell near the top (## Overview / Motivation / Key Components / Method Details / Benefits / Conclusion) that is fully self-contained and ideal as a standalone chunk or split by its ## subsections. After that the notebook is code-dominated: short '### Define the X class' markdown headers each followed by a single large code cell defining one class (DocumentProcessor, KnowledgeGraph, QueryEngine, Visualizer, GraphRAG) — these header+class pairs are natural, self-contained chunks, and the semantic payload is largely inside verbose docstrings (especially _expand_context, which documents the whole traversal algorithm in its docstring). Junk to strip: leading book-advertisement cell, pip install cell, git-clone/sys.path cell, wget data-download cell (oddly placed mid-notebook between class definitions), tqdm progress-bar outputs, a very large query-traversal output on the final query cell (flagged too large to render), a deepeval version-warning output on the import cell, and a tracking-pixel markdown image at the end. Note: 'from helper_functions import *' hides where OpenAIEmbeddings, PyPDFLoader, and BaseModel/Field come from — a chunker should not treat the import cell as a complete dependency list. Duplicate imports (networkx, matplotlib) reappear in the Visualizer cell. Markdown/code ratio outside the overview cell is very low (one-line headers), so code cells must carry their own context.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/graph_rag.json"
+}
