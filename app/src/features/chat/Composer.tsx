@@ -41,7 +41,7 @@ export function Composer({
           value={text}
           rows={2}
           disabled={busy}
-          placeholder={placeholder ?? "Describe the problem you're facing — a symptom or a detailed overview…"}
+          placeholder={placeholder ?? "Describe what you're building (use case + constraints), or the problem you're facing…"}
           aria-label="Describe your problem"
           className="max-h-48 w-full resize-none bg-transparent px-2 py-1 text-[length:var(--text-base)]
                      text-primary placeholder:text-muted focus:outline-none"

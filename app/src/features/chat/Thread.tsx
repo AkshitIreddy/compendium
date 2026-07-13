@@ -16,9 +16,9 @@ const STAGE_LABELS: Record<ProgressEvent["stage"], string> = {
 };
 
 const EXAMPLE_PROMPTS = [
+  "I'm building a RAG assistant over 10,000 legal PDFs where every answer must cite exact clauses — how should I design retrieval?",
+  "Planning a support chatbot over our product docs that must run fully on-prem, with follow-up questions — what techniques fit?",
   "My retriever finds chunks with the right keywords, but the answers keep missing the point",
-  "Answers are cut off mid-thought — retrieved chunks seem to be fragments missing their surroundings",
-  "Questions that span multiple documents fail; single-document lookups are fine",
   "I have no way to tell if my RAG changes make quality better or worse",
 ];
 
@@ -67,11 +67,12 @@ export function Thread({
       <div className="flex h-full flex-col items-center justify-center gap-[length:var(--sp-5)] p-[length:var(--sp-6)]">
         <div className="text-center">
           <h2 className="text-[length:var(--text-xl)] font-semibold tracking-tight">
-            What's going wrong?
+            What are you building — or what's going wrong?
           </h2>
           <p className="mt-1 max-w-md text-[length:var(--text-sm)] text-secondary">
-            Describe your retrieval problem in plain English — a one-line symptom or a detailed
-            overview. Compendium reasons over its curated packs and answers with cited sources.
+            Describe the system you're planning (use case + constraints) or a problem with an
+            existing one. Compendium reasons over its curated packs and recommends the techniques
+            to use, with cited sources.
           </p>
         </div>
         <div className="grid w-full max-w-xl gap-2">

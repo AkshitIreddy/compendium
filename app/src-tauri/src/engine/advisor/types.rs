@@ -35,6 +35,10 @@ pub enum Route {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TurnAnalysis {
     pub route: Route,
+    /// build (planning a new system for a use case) | diagnose (fixing an
+    /// existing one) | mixed. Drives section framing and prompt emphasis.
+    #[serde(default)]
+    pub intent: Option<String>,
     pub standalone_query: String,
     /// Extracted hard constraints ("cannot re-index", "local only", ...).
     #[serde(default)]

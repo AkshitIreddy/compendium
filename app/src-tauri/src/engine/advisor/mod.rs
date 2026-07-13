@@ -513,6 +513,7 @@ fn fallback_analysis(message: &str, conv_state: &ConversationState) -> TurnAnaly
         } else {
             Route::NewProblem
         },
+        intent: None,
         standalone_query: message.to_string(),
         constraints: conv_state.constraints.clone(),
         failure_mode_ids: Vec::new(),
@@ -527,9 +528,12 @@ async fn planner(
     conv_state: &ConversationState,
     analysis: &TurnAnalysis,
 ) -> Result<Plan> {
-    let mut user = format!("Problem (standalone): {}\n", analysis.standalone_query);
+    let mut user = format!("Request (standalone): {}\n", analysis.standalone_query);
+    if let Some(intent) = &analysis.intent {
+        user.push_str(&format!("Intent: {intent}\n"));
+    }
     if let Some(p) = &conv_state.pinned_problem {
-        user.push_str(&format!("\nOriginal problem statement:\n{p}\n"));
+        user.push_str(&format!("\nOriginal statement (the user's words):\n{p}\n"));
     }
     if !analysis.constraints.is_empty() {
         user.push_str(&format!("\nConstraints: {}\n", analysis.constraints.join("; ")));
@@ -548,12 +552,21 @@ async fn planner(
 }
 
 fn default_plan(analysis: &TurnAnalysis) -> Plan {
-    Plan {
-        sections: vec![
+    let sections = if analysis.intent.as_deref() == Some("build") {
+        vec![
+            "Recommended approach".into(),
+            "Techniques to use".into(),
+            "How they fit together".into(),
+        ]
+    } else {
+        vec![
             "Diagnosis".into(),
             "Recommended techniques".into(),
             "How they combine".into(),
-        ],
+        ]
+    };
+    Plan {
+        sections,
         sub_questions: vec![analysis.standalone_query.clone()],
         rewrites: Vec::new(),
     }
@@ -921,9 +934,12 @@ async fn synthesize(
     let system = prompts::synthesis_system(&analysis.constraints, relations_hint, &plan.sections);
     let mut user = String::new();
     if let Some(p) = &conv_state.pinned_problem {
-        user.push_str(&format!("The practitioner's problem (their words):\n{p}\n\n"));
+        user.push_str(&format!("The practitioner's request (their words):\n{p}\n\n"));
     }
     user.push_str(&format!("Standalone restatement: {}\n", analysis.standalone_query));
+    if let Some(intent) = &analysis.intent {
+        user.push_str(&format!("Intent: {intent}\n"));
+    }
     if let Some(cs) = &analysis.context_symptom {
         if cs != "not_applicable" {
             user.push_str(&format!("Context symptom: {cs}\n"));
@@ -1198,10 +1214,10 @@ fn meta_advisory(packs: &[Arc<LoadedPack>]) -> Advisory {
         failure_modes: Vec::new(),
         recommendations: Vec::new(),
         answer_md: format!(
-            "I'm Compendium — describe a technical problem you're facing (a symptom, or a detailed \
-overview of your system and where it hurts) and I'll recommend the best-fit techniques from my \
-curated knowledge packs ({}; {} techniques total), with cited source material you can read here \
-or hand to another AI.",
+            "I'm Compendium — tell me about the system you're planning (your use case and \
+constraints) or a problem you're hitting in an existing one, and I'll recommend the best-fit \
+techniques from my curated knowledge packs ({}; {} techniques total), with cited source material \
+you can read here or hand to another AI.",
             names.join(", "),
             technique_count
         ),
@@ -1222,8 +1238,15 @@ fn diagnosis_md(analysis: &TurnAnalysis, fms: &[AdvisoryFailureMode]) -> String 
         }
     }
     if !fms.is_empty() {
+        // For planned systems the matched failure modes are design targets,
+        // not a diagnosis of something already broken.
+        let label = if analysis.intent.as_deref() == Some("build") {
+            "Failure modes to design against"
+        } else {
+            "Matched failure modes"
+        };
         out.push_str(&format!(
-            "Matched failure modes: {}.",
+            "{label}: {}.",
             fms.iter().map(|f| f.name.as_str()).collect::<Vec<_>>().join("; ")
         ));
     }
