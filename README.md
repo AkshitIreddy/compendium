@@ -39,16 +39,16 @@ what each one costs you — tied to each requirement you stated.
 
 **"Something's wrong — how do I fix it?"** Describe the symptom: *"My retriever finds
 chunks with the right keywords, but the answers keep missing the point."* Compendium
-diagnoses it against a curated failure-mode taxonomy and recommends the fixes.
+diagnoses it against a curated [failure-mode taxonomy](#g-ontology) and recommends the fixes.
 
 Either way — one line or a full page of context — it answers with:
 
 - **Best-fit techniques**, ranked with per-problem justification and a confidence meter
-- **Span-accurate citations** — click any highlighted claim to open the exact notebook
+- **[Span-accurate citations](#g-span-citation)** — click any highlighted claim to open the exact notebook
   cells or docs section that back it, rendered beautifully in-app
 - **Honest tradeoffs and gaps** — it tells you what each fix costs, and says plainly when
   its knowledge doesn't cover your case
-- **A one-click dossier export** — a self-contained markdown bundle (recommendations,
+- **A one-click [dossier](#g-dossier) export** — a self-contained markdown bundle (recommendations,
   cited prose, verbatim evidence appendix) built to be pasted into any other AI as
   grounding for implementing the fix
 
@@ -72,7 +72,7 @@ New subject areas arrive as new packs — the core is entirely pack-agnostic.
 
 1. **Download** [`Compendium_0.1.0_x64-setup.exe`](https://github.com/AkshitIreddy/compendium/releases/tag/v0.1.0) (~18 MB — both knowledge packs included).
 2. **Run it.** Windows SmartScreen will warn once because the installer is unsigned —
-   click *More info → Run anyway*. It installs per-user (no admin prompt) and takes
+   click *More info → Run anyway*. It installs per-user via [NSIS](#g-nsis) (no admin prompt) and takes
    seconds.
 3. **Add your Cohere key** when the app asks. Get a free one at
    [dashboard.cohere.com/api-keys](https://dashboard.cohere.com/api-keys) — the trial
@@ -88,7 +88,7 @@ New subject areas arrive as new packs — the core is entirely pack-agnostic.
 
 ### Everyday use
 
-- **Depth tiers** — pick per question in the composer: **Quick** (~3 API calls),
+- **[Depth tiers](#g-tier)** — pick per question in the composer: **Quick** (~3 API calls),
   **Balanced** (~7, the default), **Deep** (~12+, adds corrective retrieval loops and
   per-section verification). A usage meter in Settings tracks your monthly calls.
 - **Citations** — highlighted spans in the answer are clickable; the source panel opens
@@ -108,7 +108,8 @@ New subject areas arrive as new packs — the core is entirely pack-agnostic.
 ## 🔬 For developers: the deep end starts here
 
 *Everything below is implementation detail — how the engine, packs, pipeline, and UI
-actually work, with real code from the repo.*
+actually work, with real code from the repo. Linked terms like [RRF](#g-rrf) jump to the
+[glossary](#-glossary).*
 
 </div>
 
@@ -141,9 +142,9 @@ flowchart LR
 
 Three invariants hold everywhere:
 
-1. **Packs are read-only forever.** User data lives in a separate WAL database; upgrading
+1. **[Packs](#g-knowledge-pack) are read-only forever.** User data lives in a separate WAL database; upgrading
    a pack means replacing a file.
-2. **The corpus is never embedded at runtime.** Only user queries are (with the *same*
+2. **The corpus is never [embedded](#g-embedding) at runtime.** Only user queries are (with the *same*
    model/dims the pack was built with — enforced at pack load).
 3. **No turn is ever lost.** Every API failure — outage, quota, malformed response —
    degrades to a locally-computed advisory instead of an error.
@@ -221,8 +222,8 @@ entire journey.
 #### S0 — Ontology match *(local, ~1 ms, no API)*
 
 Before any model is called, your text is compared against a few dozen pre-embedded
-**failure-mode phrasings** shipped in the pack — sentences like *"chunks that mention my
-keywords outrank the one that actually answers."* Cosine similarity against these plus a
+**[failure-mode phrasings](#g-ontology)** shipped in the pack — sentences like *"chunks that mention my
+keywords outrank the one that actually answers."* [Cosine similarity](#g-cosine) against these plus a
 keyword match produces a shortlist of failure modes your message might relate to.
 
 For a **planned use case** like the example, phrasings simply won't match strongly and
@@ -236,7 +237,7 @@ get one extra "vote" in retrieval later.
 One structured-output call to the cheap model (`command-r7b`) reads your message plus
 the conversation so far and returns a JSON analysis:
 
-- **`intent`** — `build` (you're planning something), `diagnose` (something's broken),
+- **[`intent`](#g-intent)** — `build` (you're planning something), `diagnose` (something's broken),
   or `mixed`. This reframes everything downstream: a `build` question gets an
   approach-shaped answer ("Recommended approach / Techniques to use / How they fit
   together"), not a diagnosis-shaped one.
@@ -271,25 +272,25 @@ The flagship model (`command-a`) turns the analyzed request into a **dossier pla
 - 2–4 **rewrites** of the core request in different vocabulary, to catch corpus content
   that words things differently.
 
-This is the "multi-query" insight: one embedding of your raw message would find *some*
+This is the "[multi-query](#g-multi-query)" insight: one embedding of your raw message would find *some*
 relevant content; a fan of targeted sub-questions finds the coverage a real answer needs.
 
 #### Embedding the fan *(1 call)*
 
 Every retrieval arm — standalone query, sub-questions, rewrites (plus, on Deep tier,
-the names of S0-matched failure modes) — is embedded in **one batched API call**
+the names of S0-matched failure modes) — is [embedded](#g-embedding) in **one batched API call**
 (`embed-v4.0` accepts up to 96 texts).
 
 #### S3 — Retrieval fan-out *(local, ~10 ms per arm, no API)*
 
 Each arm now searches the packs **concurrently, on-device**. Per arm, per pack:
 
-1. **Dense**: the query vector searches two usearch HNSW indexes — technique *cards*
+1. **Dense**: the query vector searches two [usearch](#g-usearch) [HNSW](#g-hnsw) indexes — technique *cards*
    (the recommendation targets) and *chunks* (the evidence).
-2. **Sparse**: the same arm, sanitized into an FTS5 `MATCH` expression, runs BM25
+2. **Sparse**: the same arm, sanitized into an FTS5 `MATCH` expression, runs [BM25](#g-bm25)
    keyword search — catching exact terms, API names, and rare tokens that embeddings
    blur.
-3. **Fusion**: the ranked lists merge via Reciprocal Rank Fusion — a rank-based formula
+3. **Fusion**: the ranked lists merge via [Reciprocal Rank Fusion](#g-rrf) — a rank-based formula
    that needs no score calibration, which matters because cosine scores and BM25 scores
    live on incomparable scales. The S0 ontology shortlist joins as one more ranked list,
    so failure-mode knowledge is literally just *one voice among several*.
@@ -305,12 +306,12 @@ candidates — fusion *selects*, exact similarity *ranks*.
 
 #### S4 — Rerank & select *(1 call)*
 
-The merged evidence — typically 30–40 chunks — goes to Cohere's cross-encoder reranker
+The merged evidence — typically 30–40 chunks — goes to Cohere's [cross-encoder reranker](#g-reranker)
 (`rerank-v4.0-pro`) in a single call, scored against your standalone query. A
 cross-encoder reads query and document *together*, so it's far more precise than the
 embedding similarity that produced the candidates. Then, locally:
 
-- **Adaptive-k**: instead of keeping a fixed top-N, the list is cut at the score
+- **[Adaptive-k](#g-adaptive-k)**: instead of keeping a fixed top-N, the list is cut at the score
   *cliff* — where relevance drops sharply — so weak evidence never pads the context.
 - **Diversity caps**: at most 2–3 chunks per technique, so one well-documented
   technique can't crowd out the comparison the dossier needs.
@@ -327,7 +328,7 @@ faithfully?**
 For each insufficient verdict, the engine re-queries **locally** (free — retrieval is
 on-device) using the grader's "what's missing" description, and adds what it finds. If
 coverage is still thin, that sub-question becomes an honest **gaps note** in the final
-answer — *"the knowledge packs have thin coverage on X"* — instead of invented prose.
+answer — *"the knowledge packs have thin coverage on X"* — instead of invented prose. (Adapted from [CRAG](#g-crag).)
 
 #### S6 — Evidence assembly *(local)*
 
@@ -340,7 +341,7 @@ documents too, so the final answer can cite the curated card, not just raw noteb
 #### S7 — Grounded synthesis *(1 call, big model; per-section on Deep)*
 
 The flagship model writes the dossier in Cohere's **documents mode**: it can only ground
-claims in the documents provided, and the API returns **character-span citations** —
+claims in the documents provided, and the API returns **[character-span citations](#g-span-citation)** —
 "characters 210–290 of the answer are supported by `rag-techniques:chunk:187`." That's
 what powers click-to-highlight in the UI, with no regex heuristics.
 
@@ -381,7 +382,7 @@ already on screen.
 | **Balanced** *(default)* | everything, once | ~5–7 | 1 | 1 |
 | **Deep** | + ontology fan-out arms, corrective re-grading, per-section synthesis and repair | ~12+ | 1–3 | 1 |
 
-**Tiers are configuration, not code paths** — the same state machine, with stages
+**[Tiers](#g-tier) are configuration, not code paths** — the same state machine, with stages
 enabled or repeated.
 
 A pleasing symmetry: the pipeline itself implements 14+ of the techniques it recommends
@@ -410,8 +411,8 @@ development, and every turn degraded gracefully in production shape.
 [`engine/search.rs`](app/src-tauri/src/engine/search.rs) runs entirely on-device in
 single-digit milliseconds against 2,600 chunks (tested headroom to ~50k+).
 
-**Candidate generation** fuses up to four ranked voices per pack with Reciprocal Rank
-Fusion — calibration-free, which matters because the voices' scores aren't comparable:
+**Candidate generation** fuses up to four ranked voices per pack ([hybrid search](#g-hybrid))
+with [Reciprocal Rank Fusion](#g-rrf) — calibration-free, which matters because the voices' scores aren't comparable:
 
 ```rust
 const RRF_K: f64 = 60.0;
@@ -498,7 +499,7 @@ CREATE VIRTUAL TABLE chunks_fts USING fts5(text, heading_path,
 
 ### Why ship both vectors *and* indexes?
 
-The f32 blobs are canonical; the f16 HNSW indexes are **derived artifacts**. That buys
+The f32 blobs are canonical; the [f16](#g-quantization) HNSW indexes are **derived artifacts**. That buys
 three things:
 
 1. **Exact re-scoring** of fused candidates (makes the f16 quantization effectively free)
@@ -646,7 +647,7 @@ sales-gated, so nothing hard-depends on them.
 
 Hard-won API facts (all live-verified, several the docs won't tell you):
 
-- **`response_format: json_schema` cannot combine with `tools` or `documents`.** The
+- **[`response_format: json_schema`](#g-structured-outputs) cannot combine with `tools` or `documents`.** The
   client makes the combination unrepresentable; the dossier is cited prose whose
   structure is assembled in Rust.
 - **`command-a-03-2025` rejects explicit `citation_options` modes** — omit the field;
@@ -735,6 +736,236 @@ Extending Compendium — a new pack, a new source type (PDF papers?), a new advi
 stage — is a normal feature PR, not a plugin API. The seams, invariants, and worked
 examples are in **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)**; the architecture
 rationale (with the research it rests on) is in **[docs/PLAN.md](docs/PLAN.md)**.
+
+---
+
+## 📖 Glossary
+
+Every entry explains the term **as it's used in this project**. Linked terms throughout
+this README jump here.
+
+<a id="g-rag"></a>
+#### RAG (Retrieval-Augmented Generation)
+The pattern of answering with a language model that first *retrieves* relevant documents
+and grounds its answer in them, instead of relying on what the model memorized during
+training. Compendium is doubly about RAG: its v1 knowledge is *about* building RAG
+systems, and the app itself *is* one — it retrieves from its packs before writing any
+advisory.
+
+<a id="g-embedding"></a>
+#### Embedding
+A list of numbers (a *vector*) representing a text's meaning, produced by an embedding
+model — texts with similar meaning get nearby vectors. Compendium uses Cohere's
+`embed-v4.0` at 1024 dimensions: every chunk and technique card was embedded once at
+pack build time, and only your query gets embedded at runtime (with the same model —
+mixing models produces meaningless similarities, which is why the app refuses to load a
+pack built with a different one).
+
+<a id="g-cosine"></a>
+#### Cosine similarity
+The standard "how close are two embeddings" score: the cosine of the angle between two
+vectors (1.0 = same direction/meaning, 0 = unrelated). Pack vectors are pre-normalized
+to length 1, which makes cosine a simple dot product — one multiply-add per dimension.
+
+<a id="g-chunk"></a>
+#### Chunk
+A retrieval-sized piece of a document — a notebook section, a docs subsection. Chunks
+are what search actually finds; each one carries its heading path, its exact location in
+the source (notebook cell range or docs anchor) for citation deep-links, and a
+[contextual header](#g-contextual-header) in its embedded text.
+
+<a id="g-contextual-header"></a>
+#### Contextual chunk header
+A line like `Technique: Reranking — Section: Motivation` prepended to a chunk's text
+*before embedding*. Without it, a chunk saying "this approach improves precision" embeds
+ambiguously — *which* approach? The header keeps document identity in every chunk. It's
+one of the corpus's own techniques, applied to the corpus itself.
+
+<a id="g-vector-store"></a>
+#### Vector store / vector index
+A data structure for finding the nearest vectors to a query vector quickly.
+Compendium's is [usearch](#g-usearch) [HNSW](#g-hnsw) indexes prebuilt at pack build
+time and shipped inside the pack file — nothing is indexed on your machine.
+
+<a id="g-usearch"></a>
+#### usearch
+A small, fast vector-search library with one C++ core and matching Python/Rust bindings
+— which is the point: Compendium *builds* indexes in Python and *loads* them in Rust,
+byte-identically. Its version is pinned in lockstep on both sides because the serialized
+format has no cross-version guarantee (and if a mismatch ever slips through, the app
+rebuilds the index from the pack's stored vectors instead of crashing).
+
+<a id="g-hnsw"></a>
+#### HNSW (Hierarchical Navigable Small World)
+The graph algorithm behind most modern vector search: vectors become nodes in a layered
+"skip-list-like" graph that can be greedily navigated to the nearest neighbors in
+milliseconds without comparing against everything. Approximate by nature — hence the
+pipeline's recall gate and exact re-scoring.
+
+<a id="g-recall"></a>
+#### Recall@10
+Of the true 10 nearest vectors (found by exhaustive exact search), how many the
+approximate index actually returned. Pack builds fail if this drops below 0.98 —
+a shipped index is never silently worse than exact search.
+
+<a id="g-quantization"></a>
+#### Quantization (f16)
+Storing index vectors at half precision (16-bit floats) — half the size, slightly fuzzy
+distances. Compendium's indexes are f16, but the full-precision f32 vectors also ship in
+the pack as the source of truth, and fused candidates are re-scored against them — so
+the quantization costs effectively nothing.
+
+<a id="g-bm25"></a>
+#### BM25 / FTS5
+Classic keyword search: BM25 is the ranking formula (rare terms matter more, term
+frequency saturates), FTS5 is SQLite's full-text engine that implements it. This is the
+"sparse" half of hybrid search — it catches exact identifiers, API names, and rare
+tokens that embeddings blur. Compendium's FTS index is prebuilt into each pack.
+
+<a id="g-hybrid"></a>
+#### Hybrid search
+Running semantic (embedding) search *and* keyword (BM25) search, then merging — because
+each one reliably finds things the other misses. The merge is done with
+[RRF](#g-rrf).
+
+<a id="g-rrf"></a>
+#### RRF (Reciprocal Rank Fusion)
+The merging formula for hybrid search: each result list votes for its members with
+weight `1/(60 + rank)`, votes sum across lists. Its virtue is needing **no score
+calibration** — cosine scores and BM25 scores live on incomparable scales, but *ranks*
+always compare. In Compendium up to four voices fuse this way: dense, sparse, the
+ontology's failure-mode matches, and (post-fusion) graph expansion.
+
+<a id="g-reranker"></a>
+#### Reranker / cross-encoder
+A model that scores a query and a document *read together* — far more accurate than
+embedding similarity (where query and document were encoded separately), but too slow to
+run against a whole corpus. Hence the two-phase shape: cheap search finds ~40
+candidates, the reranker (`rerank-v4.0-pro`) precision-scores them. Fittingly,
+"reranking" is also the technique the advisor most often recommends.
+
+<a id="g-adaptive-k"></a>
+#### Adaptive-k
+Keeping however much evidence is actually good instead of a fixed top-N: Compendium cuts
+the reranked list at the score *cliff* — the point where relevance drops sharply — so
+weak filler never pads the context window.
+
+<a id="g-ontology"></a>
+#### Failure mode / ontology
+The curated taxonomy inside the RAG pack: 25 named ways retrieval systems go wrong
+(*"right passage retrieved but ranked too low"*), each with example user phrasings and
+links to the techniques that address it, plus a typed relation graph between techniques
+(`alternative_to`, `prerequisite_of`, `composes_with`…). It's pack *data*, not app code
+— a future pack about a different subject defines its own. Used as a retrieval hint and
+for graph expansion; never forced onto a question it doesn't match.
+
+<a id="g-technique-card"></a>
+#### Technique card
+The curated, human-reviewed summary of one technique: the problem it solves, how it
+works, when to use it, tradeoffs, dependencies, relations. Cards — not raw text — are
+the advisor's recommendation targets, and they're citable documents in synthesis just
+like chunks.
+
+<a id="g-knowledge-pack"></a>
+#### Knowledge pack
+One SQLite file containing everything the app knows about a subject: cards, chunks,
+documents, embeddings, prebuilt search indexes, ontology, and mandatory license/
+attribution metadata. Built offline, read-only forever, bundled in the installer.
+
+<a id="g-intent"></a>
+#### Intent (build / diagnose)
+The intake's first classification: are you *planning* something (build — your
+requirements are the problem statement, the answer is an approach) or *fixing*
+something (diagnose — symptoms map to failure modes, the answer is remedies)? The
+dossier's shape follows.
+
+<a id="g-tier"></a>
+#### Tier (Quick / Balanced / Deep)
+How much machinery a question gets. Same pipeline, more of it enabled: Quick ≈ 3 API
+calls, Balanced ≈ 7 (adds planning, the sufficiency gate, the critic), Deep ≈ 12+
+(adds corrective loops and per-section synthesis). Pick per question in the composer.
+
+<a id="g-sufficiency"></a>
+#### Sufficiency gate
+The stage that asks, before writing: *does the retrieved evidence actually contain the
+answer, or is it merely on-topic?* Models hallucinate confidently across that gap, so
+insufficient sub-questions trigger corrective retrieval, and still-thin coverage becomes
+an honest "gaps" note instead of invented prose. Adapted from CRAG (Corrective RAG),
+one of the corpus's own techniques.
+
+<a id="g-crag"></a>
+#### CRAG / Self-RAG
+Two research lineages the pipeline borrows from: **CRAG** grades retrieved documents
+and corrects course when they're inadequate (→ the sufficiency gate); **Self-RAG**
+critiques the generated answer against the evidence (→ the claim-level critic that
+feeds confidence meters). In the corpus they're also *recommendable techniques*, and
+they sit on an escalation ladder the advisor knows never to stack.
+
+<a id="g-multi-query"></a>
+#### Multi-query / RAG-fusion
+Searching with several reformulations of the request instead of one — sub-questions,
+synonym rewrites — then fusing the results. One embedding of a vague message finds
+*some* relevant content; a planned fan of targeted queries finds the coverage a real
+answer needs. This is S2+S3 of the pipeline.
+
+<a id="g-hyde"></a>
+#### HyDE (Hypothetical Document Embedding)
+Instead of embedding your short question, ask a model to write a fake *answer* and
+embed that — answer-shaped text lands nearer to answer-shaped documents. A corpus
+technique; the pipeline uses it as an extra retrieval arm on Deep tier.
+
+<a id="g-deep-research"></a>
+#### Agentic / deep-research pattern
+The orchestration family where a planner decomposes a request, searchers gather in
+parallel, and a synthesizer + critic assemble the result — versus a single agent
+interleaving thought and search. Compendium chose it because its retrieval is local and
+essentially free, so wide fan-out costs nothing; the "searchers" are Rust functions,
+not extra LLM calls.
+
+<a id="g-span-citation"></a>
+#### Span citation
+A citation that says *exactly which characters* of the answer are supported by *which
+document* — Cohere's documents-mode chat returns these natively. They power
+click-to-highlight: the UI verifies each span's text (offsets arrive in Unicode code
+points; JavaScript counts UTF-16 units) and relocates it if the units drifted, so a
+citation can never silently highlight the wrong claim.
+
+<a id="g-dossier"></a>
+#### Dossier
+Compendium's answer format: cited prose + recommendation cards + a verbatim evidence
+appendix with stable anchors + attribution. Deliberately self-contained so the export
+can be pasted into any other AI as trustworthy grounding for implementing the fix.
+
+<a id="g-token"></a>
+#### Token / context window
+Models read text as *tokens* (word fragments, ~4 characters each) and can only attend
+to a bounded number at once (the *context window*). Compendium budgets deliberately —
+evidence gets ~14k tokens, history is summarized rather than replayed — because models
+degrade well before their nominal limits.
+
+<a id="g-structured-outputs"></a>
+#### Structured outputs (json_schema)
+Forcing a model to reply in exactly a given JSON shape, validated at the API layer.
+Every "thinking" stage of the pipeline (intake, planning, grading, critique) uses it —
+no fragile parsing of prose. One hard API rule: it can't combine with documents-mode
+citations, so the final dossier is cited prose whose structure is assembled in Rust.
+
+<a id="g-wal"></a>
+#### WAL (Write-Ahead Logging)
+SQLite's journaling mode where writes append to a log instead of rewriting pages —
+readers never block on writers. Your history database uses it; packs don't need it
+(they're immutable and opened read-only).
+
+<a id="g-lto"></a>
+#### LTO (Link-Time Optimization)
+A compiler mode where optimization runs once more over the *whole linked program*
+instead of each library separately — smaller, faster binaries, much slower builds. It's
+why Compendium's release build takes ~10 minutes while a dev check takes seconds.
+
+<a id="g-nsis"></a>
+#### NSIS
+The installer system that produces `Compendium_x64-setup.exe`. Configured `currentUser`,
+so installation never asks for admin rights and packs unpack next to the app.
 
 ---
 
