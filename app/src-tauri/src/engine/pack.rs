@@ -141,7 +141,16 @@ pub fn load_pack(path: &Path) -> Result<Arc<LoadedPack>> {
     };
 
     let dims = manifest.embedding_dims;
-    let (cards_index, healed_cards) = load_or_rebuild_index(&conn, "cards", dims)?;
+    let technique_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM techniques", [], |r| r.get(0))?;
+    // Card-less packs (e.g. webdocs) legitimately ship no cards index.
+    let (cards_index, healed_cards) = if technique_count > 0 {
+        load_or_rebuild_index(&conn, "cards", dims)?
+    } else {
+        let empty = new_index(&index_options(dims, 16, 128, 64))
+            .map_err(|e| Error::Pack(format!("usearch init: {e}")))?;
+        (empty, false)
+    };
     let (chunks_index, healed_chunks) = load_or_rebuild_index(&conn, "chunks", dims)?;
 
     let mut card_slugs = HashMap::new();

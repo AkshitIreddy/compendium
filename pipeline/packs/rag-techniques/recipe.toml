@@ -20,6 +20,7 @@ This pack contains modified/derived content (summaries, structured analyses, pro
 notebook text). Redistribution of this pack must remain non-commercial and retain this
 notice. Original license: https://github.com/NirDiamant/RAG_Techniques/blob/main/LICENSE"""
 attribution_html = """Techniques adapted (with modifications) from <a href="https://github.com/NirDiamant/RAG_Techniques">RAG_Techniques</a> by <strong>Nir Diamant</strong>, used under its custom non-commercial license. Content has been modified: analyzed, summarized, and restructured. No endorsement by or affiliation with the author is implied."""
+document_note = "Adapted from NirDiamant/RAG_Techniques (modified; non-commercial, attribution required)."
 
 [embedding]
 model = "embed-v4.0"

@@ -46,47 +46,52 @@ def build_pack(pack_dir: Path, source_dir: Path, out_dir: Path, api_key: str) ->
     writer.write_stages(processed.stages)
     writer.write_failure_modes(processed.failure_modes)
 
-    # documents + techniques + chunks
+    # documents + techniques + chunks. Packs without technique cards (e.g.
+    # webdocs) skip the card layer entirely — chunks are the knowledge.
     vendor_disclosures = recipe.processor_options.get("vendor_disclosures", {})
     slugs = sorted(processed.cards)
     card_keys = {slug: i + 1 for i, slug in enumerate(slugs)}
     chunk_rows: list[tuple[int, str]] = []  # (chunk_id, embed_text)
+    doc_kind = "notebook" if recipe.source_type == "notebook" else "webdoc"
 
     for doc in processed.docs:
-        card = processed.cards[doc.slug]
-        graph_entry = processed.graph[doc.slug]
+        card = processed.cards.get(doc.slug)
         doc_id = writer.write_document(
-            kind="notebook",
-            title=card["title"],
+            kind=doc_kind,
+            title=card["title"] if card else doc.title,
             source_url=doc.source_url,
-            license_note="Adapted from NirDiamant/RAG_Techniques (modified; non-commercial, attribution required).",
+            license_note=recipe.document_note,
             content=doc.content,
         )
-        writer.write_technique(
-            {
-                "slug": doc.slug,
-                "card_key": card_keys[doc.slug],
-                "title": card["title"],
-                "one_liner": card["one_liner"],
-                "stage_id": graph_entry["stage"],
-                "complexity": card["complexity"],
-                "problem_solved": card["problem_solved"],
-                "how_it_works": card["how_it_works"],
-                "when_to_use": json.dumps(card["when_to_use"]),
-                "tradeoffs": json.dumps(card["tradeoffs"]),
-                "key_dependencies": json.dumps(card.get("key_dependencies", [])),
-                "keywords": json.dumps(card.get("keywords", [])),
-                "summary": card["summary"],
-                "vendor_disclosure": vendor_disclosures.get(doc.slug),
-                "document_id": doc_id,
-            }
-        )
-        writer.write_technique_failure_modes(
-            [(doc.slug, fm_id) for fm_id in graph_entry["failure_mode_ids"]]
-        )
+        if card:
+            graph_entry = processed.graph[doc.slug]
+            writer.write_technique(
+                {
+                    "slug": doc.slug,
+                    "card_key": card_keys[doc.slug],
+                    "title": card["title"],
+                    "one_liner": card["one_liner"],
+                    "stage_id": graph_entry["stage"],
+                    "complexity": card["complexity"],
+                    "problem_solved": card["problem_solved"],
+                    "how_it_works": card["how_it_works"],
+                    "when_to_use": json.dumps(card["when_to_use"]),
+                    "tradeoffs": json.dumps(card["tradeoffs"]),
+                    "key_dependencies": json.dumps(card.get("key_dependencies", [])),
+                    "keywords": json.dumps(card.get("keywords", [])),
+                    "summary": card["summary"],
+                    "vendor_disclosure": vendor_disclosures.get(doc.slug),
+                    "document_id": doc_id,
+                }
+            )
+            writer.write_technique_failure_modes(
+                [(doc.slug, fm_id) for fm_id in graph_entry["failure_mode_ids"]]
+            )
         for chunk in doc.chunks:
+            context = card["title"] if card else doc.title
+            prefix = "Technique" if card else "Doc"
             embed_text = (
-                f"Technique: {card['title']} — Section: {chunk.heading_path}\n\n{chunk.body}"
+                f"{prefix}: {context} — Section: {chunk.heading_path}\n\n{chunk.body}"
             )
             chunk_id = writer.write_chunk(
                 {
@@ -97,7 +102,7 @@ def build_pack(pack_dir: Path, source_dir: Path, out_dir: Path, api_key: str) ->
                     "text": embed_text,
                     "display_text": chunk.body,
                     "token_count": _token_estimate(embed_text),
-                    "location": json.dumps({"cells": [chunk.first_cell, chunk.last_cell]}),
+                    "location": json.dumps(chunk.location),
                 }
             )
             chunk_rows.append((chunk_id, embed_text))
@@ -115,12 +120,14 @@ def build_pack(pack_dir: Path, source_dir: Path, out_dir: Path, api_key: str) ->
         print(f"  dropped {len(dropped)} dangling relations: {dropped}")
 
     # ---- embeddings
-    print("embedding technique cards...")
-    card_texts = [_card_embed_text(processed.cards[s]) for s in slugs]
-    card_vecs = embedder.embed(card_texts)
-    writer.write_card_embeddings(
-        [(s, card_vecs[i].astype("<f4").tobytes()) for i, s in enumerate(slugs)]
-    )
+    card_vecs = None
+    if slugs:
+        print("embedding technique cards...")
+        card_texts = [_card_embed_text(processed.cards[s]) for s in slugs]
+        card_vecs = embedder.embed(card_texts)
+        writer.write_card_embeddings(
+            [(s, card_vecs[i].astype("<f4").tobytes()) for i, s in enumerate(slugs)]
+        )
 
     print("embedding chunks...")
     chunk_vecs = embedder.embed([t for _, t in chunk_rows])
@@ -128,43 +135,52 @@ def build_pack(pack_dir: Path, source_dir: Path, out_dir: Path, api_key: str) ->
         [(cid, chunk_vecs[i].astype("<f4").tobytes()) for i, (cid, _) in enumerate(chunk_rows)]
     )
 
-    print("embedding failure-mode phrasings...")
     phrasing_rows = [
         (fm["id"], p)
         for fm in processed.failure_modes
         for p in fm["example_phrasings"]
     ]
-    phrasing_vecs = embedder.embed([p for _, p in phrasing_rows])
-    writer.write_phrasing_embeddings(
-        [
-            (fm_id, p, phrasing_vecs[i].astype("<f4").tobytes())
-            for i, (fm_id, p) in enumerate(phrasing_rows)
-        ]
-    )
+    if phrasing_rows:
+        print("embedding failure-mode phrasings...")
+        phrasing_vecs = embedder.embed([p for _, p in phrasing_rows])
+        writer.write_phrasing_embeddings(
+            [
+                (fm_id, p, phrasing_vecs[i].astype("<f4").tobytes())
+                for i, (fm_id, p) in enumerate(phrasing_rows)
+            ]
+        )
 
     writer.finish_chunks_fts()
 
     # ---- vector indexes
     print("building usearch indexes...")
-    card_blob, card_recall = build_index(
-        np.array([card_keys[s] for s in slugs], dtype=np.uint64), card_vecs, recipe.index
-    )
+    gates: list[tuple[str, float]] = []
+    if card_vecs is not None:
+        card_blob, card_recall = build_index(
+            np.array([card_keys[s] for s in slugs], dtype=np.uint64), card_vecs, recipe.index
+        )
+        gates.append(("cards", card_recall))
+        writer.write_vector_index(
+            index_row("cards", card_blob, card_recall, recipe.embedding.dims, len(slugs), recipe.index)
+        )
     chunk_blob, chunk_recall = build_index(
         np.array([cid for cid, _ in chunk_rows], dtype=np.uint64), chunk_vecs, recipe.index
     )
-    print(f"  recall@10 cards={card_recall:.4f} chunks={chunk_recall:.4f} (gate {recipe.index.recall_gate})")
-    for tier, recall in (("cards", card_recall), ("chunks", chunk_recall)):
+    gates.append(("chunks", chunk_recall))
+    writer.write_vector_index(
+        index_row("chunks", chunk_blob, chunk_recall, recipe.embedding.dims, len(chunk_rows), recipe.index)
+    )
+    print(
+        "  recall@10 "
+        + " ".join(f"{t}={r:.4f}" for t, r in gates)
+        + f" (gate {recipe.index.recall_gate})"
+    )
+    for tier, recall in gates:
         if recall < recipe.index.recall_gate:
             raise RuntimeError(
                 f"{tier} index recall@10 {recall:.4f} below gate {recipe.index.recall_gate} — "
                 "raise expansion_search/expansion_add in the recipe and rebuild"
             )
-    writer.write_vector_index(
-        index_row("cards", card_blob, card_recall, recipe.embedding.dims, len(slugs), recipe.index)
-    )
-    writer.write_vector_index(
-        index_row("chunks", chunk_blob, chunk_recall, recipe.embedding.dims, len(chunk_rows), recipe.index)
-    )
 
     # ---- manifest + finalize
     import usearch as _usearch

@@ -36,6 +36,7 @@ class Recipe:
     license_id: str
     license_text: str
     attribution_html: str
+    document_note: str
     embedding: EmbeddingSpec = field(default_factory=EmbeddingSpec)
     index: IndexSpec = field(default_factory=IndexSpec)
     source: dict = field(default_factory=dict)
@@ -56,7 +57,7 @@ def load_recipe(pack_dir: str | Path) -> Recipe:
 
     pack = raw["pack"]
     lic = raw["license"]
-    for key in ("id", "text", "attribution_html"):
+    for key in ("id", "text", "attribution_html", "document_note"):
         if not lic.get(key, "").strip():
             raise ValueError(f"recipe license.{key} is required and must be non-empty")
 
@@ -70,6 +71,7 @@ def load_recipe(pack_dir: str | Path) -> Recipe:
         license_id=lic["id"],
         license_text=lic["text"],
         attribution_html=lic["attribution_html"],
+        document_note=lic["document_note"],
         embedding=EmbeddingSpec(**raw.get("embedding", {})),
         index=IndexSpec(**raw.get("index", {})),
         source=raw.get("source", {}),

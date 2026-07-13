@@ -150,13 +150,16 @@ export function SourcePanel({
     })();
   }, [request]);
 
-  const cells: NotebookCell[] = (() => {
-    if (!doc) return [];
+  const { cells, markdownText } = (() => {
+    if (!doc) return { cells: [] as NotebookCell[], markdownText: null as string | null };
     try {
       const content = JSON.parse(doc.content);
-      return content.cells ?? [];
+      if (content.format === "markdown") {
+        return { cells: [] as NotebookCell[], markdownText: (content.text as string) ?? "" };
+      }
+      return { cells: (content.cells ?? []) as NotebookCell[], markdownText: null };
     } catch {
-      return [];
+      return { cells: [] as NotebookCell[], markdownText: null };
     }
   })();
 
@@ -210,7 +213,10 @@ export function SourcePanel({
         {!error && view === "card" && technique && (
           <TechniqueDetail technique={technique} onOpenNotebook={() => setView("document")} />
         )}
-        {!error && view === "document" && doc && (
+        {!error && view === "document" && doc && markdownText != null && (
+          <Markdown text={markdownText} />
+        )}
+        {!error && view === "document" && doc && markdownText == null && (
           <NotebookViewer
             cells={cells}
             focusCells={request.focusCells ?? null}

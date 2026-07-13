@@ -1,0 +1,129 @@
+# Framework Docs pack: LangChain + LangGraph + LangSmith documentation from
+# docs.langchain.com. Acquisition method + allowlists verified in
+# research/docs-acquisition.md and research/langsmith-docs-scope.md.
+#
+# Build (the --source arg is the page cache directory, e.g. .cache/webdocs):
+#   python -m compendium_pack build packs/framework-docs --source .cache/webdocs
+#
+# Refresh: re-run monthly; content-hash caching re-embeds only changed pages.
+# Guardrails (enforced by the webdocs processor): allowlisted 404s fail the
+# build; page-count swings ±10% from expected_pages fail the build.
+
+[pack]
+id = "framework-docs"
+version = "2026.07.0"
+name = "Framework Docs"
+description = "Current LangChain, LangGraph, and LangSmith documentation scoped to retrieval, agentic RAG, memory, evaluation, observability, and prompt engineering."
+source_type = "webdocs"
+
+[source]
+base_url = "https://docs.langchain.com"
+expected_pages = 155
+# Hierarchical /oss/ namespace: prefix allowlist (LangChain + LangGraph, Python)
+url_prefixes = [
+  "/oss/python/langchain/retrieval",
+  "/oss/python/langchain/knowledge-base",
+  "/oss/python/langchain/overview",
+  "/oss/python/langchain/quickstart",
+  "/oss/python/langchain/structured-output",
+  "/oss/python/langchain/streaming",
+  "/oss/python/langchain/short-term-memory",
+  "/oss/python/langchain/long-term-memory",
+  "/oss/python/langchain/context-engineering",
+  "/oss/python/langchain/agents",
+  "/oss/python/langchain/observability",
+  "/oss/python/langchain/test",
+  "/oss/python/integrations/retrievers",
+  "/oss/python/integrations/vectorstores",
+  "/oss/python/integrations/splitters",
+  "/oss/python/integrations/embeddings",
+  "/oss/python/integrations/document_loaders",
+  "/oss/python/langgraph/agentic-rag",
+  "/oss/python/langgraph/overview",
+  "/oss/python/langgraph/graph-api",
+  "/oss/python/langgraph/persistence",
+  "/oss/python/langgraph/add-memory",
+  "/oss/python/langgraph/streaming",
+  "/oss/python/langgraph/workflows-agents",
+  "/oss/python/langgraph/use-subgraphs",
+]
+# Flat /langsmith/ namespace: exact-slug allowlist (127 pages, verified 200 OK)
+exact_slug_prefix = "/langsmith/"
+exact_slugs = [
+  # Evaluation — core concepts (5)
+  "test-overview", "evaluation", "evaluation-quickstart", "evaluation-concepts", "evaluation-approaches",
+  # Evaluation — datasets & data formats (6)
+  "manage-datasets", "manage-datasets-in-application", "manage-datasets-programmatically",
+  "example-data-format", "dataset-json-types", "dataset-transformations",
+  # Evaluation — running evals (4)
+  "evaluate-llm-application", "evaluate-with-opentelemetry", "run-evaluation-from-playground", "run-evals-api-only",
+  # Evaluation — evaluator types (11)
+  "evaluation-types", "llm-as-judge", "llm-as-judge-sdk", "code-evaluator-ui", "code-evaluator-sdk",
+  "composite-evaluators-ui", "composite-evaluators-sdk", "summary", "evaluate-pairwise",
+  "evaluators", "manage-evaluators-sdk",
+  # Evaluation — techniques & experiment configuration (18)
+  "define-target-function", "evaluate-on-intermediate-steps", "langchain-runnable", "evaluate-graph",
+  "multi-turn-simulation", "trajectory-evals", "multiple-scores", "metric-type",
+  "experiment-configuration", "evaluation-async", "repetition", "handle-model-rate-limiting",
+  "bind-evaluator-to-dataset", "evaluate-existing-experiment", "local", "read-local-experiment-results",
+  "evaluate-with-retry", "evaluate-with-attachments",
+  # Evaluation — improving judges (2)
+  "improve-judge-evaluator-feedback", "create-few-shot-evaluators",
+  # Evaluation — test frameworks (3)
+  "openevals", "pytest", "vitest-jest",
+  # Evaluation — tutorials (5)
+  "evaluate-chatbot-tutorial", "evaluate-rag-tutorial", "test-react-agent-pytest",
+  "evaluate-complex-agent", "run-backtests-new-agent",
+  # Evaluation — analyzing experiments (5)
+  "analyze-an-experiment", "compare-experiment-results", "filter-experiments-ui",
+  "fetch-perf-metrics-experiment", "upload-existing-experiments",
+  # Evaluation — annotation & human feedback (7)
+  "annotation-queues", "annotation-queues-sdk", "assertions", "set-up-feedback-criteria",
+  "annotate-traces-inline", "audit-evaluator-scores", "attach-user-feedback",
+  # Online evaluation & automations (6)
+  "online-evaluations-llm-as-judge", "online-evaluations-multi-turn", "online-evaluations-code",
+  "online-evaluations-composite", "rules", "webhooks",
+  # Prompt engineering (13)
+  "prompt-engineering", "prompt-engineering-quickstart", "prompt-engineering-concepts",
+  "create-a-prompt", "manage-prompts", "manage-prompts-programmatically", "prompt-template-format",
+  "use-tools", "multimodal-content", "write-prompt-with-ai", "optimize-classifier",
+  "prompt-commit", "multiple-messages",
+  # Context engineering (2)
+  "context-engineering-concepts", "context-hub",
+  # Observability — core (4)
+  "observability", "observability-concepts", "observability-quickstart", "observability-llm-tutorial",
+  # Tracing — instrumentation (9)
+  "annotate-code", "trace-with-api", "log-llm-trace", "log-retriever-trace",
+  "ls-metadata-parameters", "upload-files-with-traces", "trace-with-langchain",
+  "trace-with-langgraph", "trace-with-opentelemetry",
+  # Tracing — configuration & troubleshooting (15)
+  "log-traces-to-project", "trace-without-env-vars", "conditional-tracing", "sample-traces",
+  "distributed-tracing", "access-current-span", "serverless-environments", "log-multimodal-traces",
+  "trace-generator-functions", "add-metadata-tags", "mask-inputs-outputs", "redact-secrets",
+  "nest-traces", "troubleshooting-variable-caching", "troubleshooting",
+  # Trace debugging & data formats (9)
+  "view-traces", "filter-traces-in-application", "manage-trace", "export-traces",
+  "trace-query-syntax", "query-threads", "threads", "run-data-format", "feedback-data-format",
+  # Monitoring (3)
+  "dashboards", "alerts", "insights",
+]
+
+[license]
+id = "mit-langchain"
+text = """Documentation content (c) LangChain, from docs.langchain.com, used under the
+MIT License (source repository: github.com/langchain-ai/docs). Processed content
+(chunked, embedded) is a modified form of the original pages."""
+attribution_html = """Framework documentation © <a href="https://docs.langchain.com">LangChain</a>, MIT License (<a href="https://github.com/langchain-ai/docs">source</a>). Content snapshot; processed and chunked for retrieval."""
+document_note = "Documentation (c) LangChain, MIT License, from docs.langchain.com (snapshot; may lag the live docs)."
+
+[embedding]
+model = "embed-v4.0"
+dims = 1024
+input_type = "search_document"
+
+[index]
+connectivity = 24
+expansion_add = 384
+expansion_search = 192
+quantization = "f16"
+recall_gate = 0.98

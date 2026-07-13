@@ -7,10 +7,11 @@ from __future__ import annotations
 
 from typing import Callable
 
-from . import notebook
+from . import notebook, webdocs
 
 PROCESSORS: dict[str, Callable] = {
     "notebook": notebook.process,
+    "webdocs": webdocs.process,
 }
 
 

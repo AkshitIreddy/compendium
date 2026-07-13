@@ -32,8 +32,7 @@ class Chunk:
     heading_path: str
     kind: str  # markdown | code | mixed
     body: str
-    first_cell: int
-    last_cell: int
+    location: dict  # {"cells": [first, last]} for notebooks, {"anchor": "#..."} for webdocs
 
 
 @dataclass
@@ -233,8 +232,9 @@ def _chunk_segments(segments: list[_Segment], slug: str) -> list[Chunk]:
                 heading_path=cur[0].heading_path,
                 kind=kind,
                 body=body,
-                first_cell=min(s.cell_idx for s in cur),
-                last_cell=max(s.cell_idx for s in cur),
+                location={
+                    "cells": [min(s.cell_idx for s in cur), max(s.cell_idx for s in cur)]
+                },
             )
         )
         cur.clear()

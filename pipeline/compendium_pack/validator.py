@@ -50,16 +50,17 @@ def validate_pack(path: Path) -> dict:
             "technique_relations", "technique_failure_modes",
         )
     }
-    check(counts["techniques"] > 0, "no techniques")
+    has_cards = counts["techniques"] > 0
     check(counts["chunks"] > 0, "no chunks")
     check(counts["card_embeddings"] == counts["techniques"], "card embedding count mismatch")
     check(counts["chunk_embeddings"] == counts["chunks"], "chunk embedding count mismatch")
 
-    orphan_techniques = db.execute(
-        "SELECT COUNT(*) FROM techniques t WHERE NOT EXISTS "
-        "(SELECT 1 FROM chunks c WHERE c.technique_slug = t.slug)"
-    ).fetchone()[0]
-    check(orphan_techniques == 0, f"{orphan_techniques} techniques have zero chunks")
+    if has_cards:
+        orphan_techniques = db.execute(
+            "SELECT COUNT(*) FROM techniques t WHERE NOT EXISTS "
+            "(SELECT 1 FROM chunks c WHERE c.technique_slug = t.slug)"
+        ).fetchone()[0]
+        check(orphan_techniques == 0, f"{orphan_techniques} techniques have zero chunks")
 
     for table, id_col in (("card_embeddings", "technique_slug"), ("chunk_embeddings", "chunk_id")):
         bad = db.execute(
@@ -78,11 +79,11 @@ def validate_pack(path: Path) -> dict:
     check(bool(sample), "FTS smoke query for 'retrieval' returned nothing")
 
     # vector indexes: hash, loadability, self-query sanity
-    for tier, id_query in (
-        ("cards", "SELECT t.card_key, e.vector FROM techniques t "
-                  "JOIN card_embeddings e ON e.technique_slug = t.slug ORDER BY t.card_key"),
-        ("chunks", "SELECT chunk_id, vector FROM chunk_embeddings ORDER BY chunk_id"),
-    ):
+    tiers = [("chunks", "SELECT chunk_id, vector FROM chunk_embeddings ORDER BY chunk_id")]
+    if has_cards:
+        tiers.insert(0, ("cards", "SELECT t.card_key, e.vector FROM techniques t "
+            "JOIN card_embeddings e ON e.technique_slug = t.slug ORDER BY t.card_key"))
+    for tier, id_query in tiers:
         row = db.execute(
             "SELECT blob, sha256, count, dims, quantization FROM vector_indexes WHERE tier = ?",
             (tier,),
