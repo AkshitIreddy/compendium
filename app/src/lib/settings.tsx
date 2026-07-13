@@ -11,6 +11,7 @@ import {
 } from "react";
 import { ipc } from "./ipc";
 import type { Tier } from "./types";
+import { configureSound, DEFAULT_SOUND_PREFS, type SoundEvent } from "./sound";
 
 export interface UiSettings {
   theme: "system" | "porcelain" | "graphite" | "midnight" | "contrast";
@@ -22,6 +23,7 @@ export interface UiSettings {
   codeLigatures: boolean;
   soundEnabled: boolean;
   soundVolume: number; // 0-1
+  soundEvents: Record<SoundEvent, boolean>;
   sourcePanelSide: "right" | "bottom";
   tier: Tier;
   clarifyingQuestions: boolean;
@@ -37,6 +39,7 @@ export const DEFAULTS: UiSettings = {
   codeLigatures: false,
   soundEnabled: false,
   soundVolume: 0.5,
+  soundEvents: DEFAULT_SOUND_PREFS.events,
   sourcePanelSide: "right",
   tier: "balanced",
   clarifyingQuestions: true,
@@ -60,6 +63,7 @@ export function applyToDocument(s: UiSettings) {
   root.style.setProperty("--accent-c", String(Math.min(Math.max(s.accentChroma, 0), 0.16)));
   root.style.setProperty("--font-scale", String(s.fontScale));
   root.style.setProperty("--code-ligatures", s.codeLigatures ? "normal" : "none");
+  configureSound({ enabled: s.soundEnabled, volume: s.soundVolume, events: s.soundEvents });
 }
 
 interface SettingsContextValue {

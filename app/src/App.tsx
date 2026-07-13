@@ -15,6 +15,10 @@ import { Composer } from "./features/chat/Composer";
 import { SourcePanel } from "./features/sources/SourcePanel";
 import type { SourceRequest } from "./features/chat/AdvisoryView";
 import { KeySetup } from "./features/onboarding/KeySetup";
+import { SettingsPanel } from "./features/settings/SettingsPanel";
+import { CommandPalette } from "./features/palette/CommandPalette";
+import { play } from "./lib/sound";
+import { useSettings } from "./lib/settings";
 
 export default function App() {
   const [conversations, setConversations] = useState<ConversationMeta[]>([]);
@@ -28,6 +32,9 @@ export default function App() {
   const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null);
   const [showKeySetup, setShowKeySetup] = useState(false);
   const [composerSeed, setComposerSeed] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const { settings, update } = useSettings();
 
   const refreshConversations = useCallback(() => {
     ipc.conversationList().then(setConversations).catch(() => {});
@@ -53,6 +60,24 @@ export default function App() {
     };
   }, [refreshConversations]);
 
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.ctrlKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPaletteOpen((o) => !o);
+      } else if (e.ctrlKey && e.key === ",") {
+        e.preventDefault();
+        setSettingsOpen(true);
+      } else if (e.ctrlKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        newConversation();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const openConversation = useCallback(async (id: number) => {
     setActiveId(id);
     setError(null);
@@ -77,6 +102,7 @@ export default function App() {
     setBusy(true);
     setError(null);
     setStage("analyzing");
+    play("send");
     // optimistic user turn
     setTurns((prev) => [
       ...prev,
@@ -95,6 +121,7 @@ export default function App() {
       const detail = await ipc.conversationGet(result.conversation_id);
       setTurns(detail.turns);
       refreshConversations();
+      play("result");
     } catch (e) {
       const err = e as IpcError;
       setError(
@@ -104,6 +131,7 @@ export default function App() {
             ? "No API key configured — add one to get full advisories."
             : (err.message ?? "Something went wrong."),
       );
+      play("error");
       // roll back the optimistic turn on hard failure
       setTurns((prev) => prev.filter((t) => t.id > 0));
     } finally {
@@ -163,6 +191,43 @@ export default function App() {
           <SourcePanel request={source} onClose={() => setSource(null)} />
         </div>
       )}
+
+      <button
+        type="button"
+        onClick={() => setSettingsOpen(true)}
+        aria-label="Open settings (Ctrl+,)"
+        title="Settings (Ctrl+,)"
+        className="fixed bottom-3 left-3 z-10 rounded-full border border-edge bg-surface p-2
+                   text-secondary shadow-[var(--shadow-raised)] transition-token
+                   hover:text-primary hover:border-edge-strong"
+      >
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden>
+          <circle cx="12" cy="12" r="3" />
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+        </svg>
+      </button>
+
+      <SettingsPanel
+        open={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        keyStatus={keyStatus}
+        onKeyChange={setKeyStatus}
+      />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        conversations={conversations}
+        actions={{
+          newConversation,
+          openConversation,
+          openSettings: () => setSettingsOpen(true),
+          cycleTheme: () => {
+            const order = ["system", "porcelain", "graphite", "midnight", "contrast"] as const;
+            const next = order[(order.indexOf(settings.theme) + 1) % order.length];
+            update("theme", next);
+          },
+        }}
+      />
     </div>
   );
 }
