@@ -21,6 +21,10 @@ answers with cited, exportable knowledge dossiers.
 [The advisor pipeline](#-the-advisor-pipeline) · [Pack format](#-knowledge-pack-format) ·
 [Build pipeline](#-the-offline-build-pipeline) · [Contributing](docs/CONTRIBUTING.md)
 
+<img src="assets/demo.webp" width="880" alt="Compendium demo — asking a use-case question, the pipeline stages running, the cited advisory rendering, and a citation opening its source notebook" />
+
+<sub>↑ a real advisory, captured from the app in demo mode — scripted and rendered with <a href="https://www.npmjs.com/package/gifsmith">gifsmith</a></sub>
+
 </div>
 
 ---

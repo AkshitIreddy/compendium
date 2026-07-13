@@ -1,20 +1,12 @@
 import { memo, useMemo, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import rehypeSanitize, { defaultSchema } from "rehype-sanitize";
+import rehypeSanitize from "rehype-sanitize";
 import { CodeBlock } from "../../components/CodeBlock";
 import type { SpanCitation } from "../../lib/types";
 
-// Allow our cite: protocol through sanitization (used for citation marks).
-const schema = {
-  ...defaultSchema,
-  protocols: {
-    ...defaultSchema.protocols,
-    href: [...(defaultSchema.protocols?.href ?? []), "cite"],
-  },
-};
-
-/** Splice citation spans into the source markdown as `[text](cite:i)` links.
+/** Splice citation spans into the source markdown as `[text](#cite-i)` links
+ * — anchor-style hrefs pass the sanitizer untouched (custom protocols do not).
  *
  * Cohere reports start/end in Unicode code points against the text it
  * generated, while JS string indices are UTF-16 code units — any astral
@@ -57,7 +49,7 @@ function spliceCitations(md: string, citations: SpanCitation[]): string {
       continue; // would break block or link structure; keep text unmarked
     }
     out += md.slice(pos, c.start);
-    out += `[${c.text}](cite:${c.i})`;
+    out += `[${c.text}](#cite-${c.i})`;
     pos = c.end;
   }
   out += md.slice(pos);
@@ -81,7 +73,7 @@ export const CitedMarkdown = memo(function CitedMarkdown({
     <div className="prose-compendium">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
-        rehypePlugins={[[rehypeSanitize, schema]]}
+        rehypePlugins={[rehypeSanitize]}
         components={{
           code({ className, children, ...props }) {
             const match = /language-(\w+)/.exec(className ?? "");
@@ -96,8 +88,8 @@ export const CitedMarkdown = memo(function CitedMarkdown({
             );
           },
           a({ href, children }) {
-            if (href?.startsWith("cite:")) {
-              const idx = Number(href.slice(5));
+            if (href?.startsWith("#cite-")) {
+              const idx = Number(href.slice(6));
               const citation = citations[idx];
               if (!citation) return <>{children as ReactNode}</>;
               return (
