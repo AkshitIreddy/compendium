@@ -1,0 +1,7 @@
+# Pinned pipeline dependencies. usearch MUST stay in lockstep with the
+# Rust crate version in app/src-tauri/Cargo.toml (serialized index format
+# has no cross-version guarantee).
+usearch==2.26.0
+numpy>=1.26,<3
+nbformat>=5.9,<6
+requests>=2.31,<3
