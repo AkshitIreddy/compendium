@@ -61,19 +61,16 @@ export function Thread({
   const nearBottom = useRef(true);
   const lastCount = useRef(turns.length);
 
-  // Reader-respecting autoscroll: your own message follows you to the bottom;
-  // a finished advisory scrolls its BEGINNING into view (you read top-down),
-  // and nothing moves at all if you've scrolled away to read something else.
+  // Autoscroll only for the user's own message (standard chat behavior).
+  // A finished advisory NEVER moves the view: content appends below where
+  // you already are, so reading is never interrupted.
   useEffect(() => {
     const grew = turns.length > lastCount.current;
     lastCount.current = turns.length;
     if (!grew) return;
     const last = turns[turns.length - 1];
-    if (last?.role === "user") {
+    if (last?.role === "user" && nearBottom.current) {
       bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-    } else if (nearBottom.current) {
-      const el = containerRef.current?.querySelector(`[data-turn="${last?.id}"]`);
-      el?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   }, [turns]);
 
