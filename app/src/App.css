@@ -1,0 +1,33 @@
+/* Phase 3 debug styling only — the real design system arrives in Phase 5. */
+.debug {
+  font-family: ui-sans-serif, system-ui, sans-serif;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  line-height: 1.5;
+}
+.debug h1 {
+  font-size: 1.2rem;
+}
+.debug h2 {
+  font-size: 1rem;
+  margin-top: 1.5rem;
+  border-bottom: 1px solid #8884;
+}
+.debug h3 {
+  font-size: 0.9rem;
+  margin-bottom: 0.25rem;
+}
+.debug code {
+  font-family: ui-monospace, monospace;
+  background: #8882;
+  padding: 0 0.25em;
+  border-radius: 3px;
+}
+.debug .error {
+  color: #c0392b;
+  white-space: pre-wrap;
+}
+.debug .results {
+  font-size: 0.85rem;
+}
