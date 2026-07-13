@@ -89,7 +89,7 @@ New subject areas arrive as new packs — the core is entirely pack-agnostic.
   "we can't re-index, does that change things?" just work.
 - **Export** — *Copy dossier for another AI* puts a complete, cited, self-contained
   markdown bundle on your clipboard.
-- **Make it yours** — Settings (⌘ the gear, or `Ctrl+,`): four themes + system, any
+- **Make it yours** — Settings (the gear button, or `Ctrl+,`): four themes + system, any
   accent hue (contrast-safe by construction), density, text scale, motion intensity,
   optional UI sounds. Everything applies live. `Ctrl+K` opens the command palette.
 
