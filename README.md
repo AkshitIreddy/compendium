@@ -27,13 +27,21 @@ answers with cited, exportable knowledge dossiers.
 
 ## 💡 What is Compendium?
 
-You're building a RAG system and something's wrong. *"My retriever finds chunks with the
-right keywords, but the answers keep missing the point."* You know the fix exists — it's
-somewhere across 44 technique notebooks, three sets of framework docs, and a dozen papers
-you haven't read.
+Compendium is a desktop advisor that already read the material you haven't had time to —
+44 technique notebooks, three sets of framework docs — and recommends **what to use for
+your situation**. It handles two kinds of questions, and both are first-class:
 
-Compendium is a desktop app that already read all of it. Describe your problem in plain
-English — one line or a full page — and it answers with:
+**"I'm planning something — what should I use?"** Describe your use case and its
+constraints in plain English: *"I'm building a RAG assistant over 10,000 legal PDFs;
+every answer must cite exact clauses, and data can't leave our infrastructure."*
+Compendium recommends a concrete approach — which techniques, how they fit together,
+what each one costs you — tied to each requirement you stated.
+
+**"Something's wrong — how do I fix it?"** Describe the symptom: *"My retriever finds
+chunks with the right keywords, but the answers keep missing the point."* Compendium
+diagnoses it against a curated failure-mode taxonomy and recommends the fixes.
+
+Either way — one line or a full page of context — it answers with:
 
 - **Best-fit techniques**, ranked with per-problem justification and a confidence meter
 - **Span-accurate citations** — click any highlighted claim to open the exact notebook
@@ -189,7 +197,7 @@ sequenceDiagram
     participant P as Packs (local, ~10ms)
     participant C as Cohere API
 
-    U->>E: "answers keep missing the point…"
+    U->>E: "building a support chatbot, on-prem, follow-ups…"
     E->>P: S0 ontology match (pre-embedded failure-mode phrasings)
     E->>C: S1 intake — route · rewrite · constraints · clarify? (R7B, JSON schema)
     E->>C: S2 plan — dossier outline + sub-questions + rewrites (Command A)
@@ -204,34 +212,180 @@ sequenceDiagram
     E->>U: S9 advisory: cited dossier + cards + evidence (cached for follow-ups)
 ```
 
-| Stage | What happens | Cost |
-|---|---|---|
-| **S0** | User text scored against pre-embedded failure-mode phrasings + keyword FTS — a zero-LLM symptom matcher | local |
-| **S1** | One combined intake call: route (5-way), standalone query rewrite, constraint extraction, failure-mode confirmation, **starved-vs-polluted disambiguation**, ≤1 clarifying question | 1× R7B |
-| **S2** | Dossier outline + sub-questions + diverse rewrites (skipped on Quick) | 1× Command A |
-| **S3** | Per-arm hybrid retrieval with cross-arm merge (details below) | local |
-| **S4** | Rerank merged evidence → adaptive-k cut at the score cliff → per-technique diversity caps | 1× rerank |
-| **S5** | Batched CRAG-style sufficiency verdicts per sub-question; failures trigger a **zero-API corrective re-query** using the grader's "missing" terms; still-thin coverage becomes an honest *gaps* note | 1× R7B |
-| **S6** | Evidence assembly: stable anchors, per-card token budgets, sandwich ordering | local |
-| **S7** | Synthesis in Cohere documents mode — technique cards are citable documents alongside chunks, so citations land on both | 1× Command A |
-| **S8** | Local citation-integrity check, then a claim-level critic; confidence = retrieval strength ⊕ rerank ⊕ critic verdict | 1× R7B |
-| **S9** | Advisory JSON persisted (offline re-renderable), evidence cached for follow-up reuse, trace written | local |
+### Stage by stage — what actually happens to your question
 
-**Tiers are configuration, not code paths** — Quick skips S2/S5/S8 (~3 calls), Balanced
-runs everything once (~7), Deep adds ontology fan-out arms and corrective loops (~12+).
+Suppose you type: *"I'm building a support chatbot over our product docs. It has to run
+on-prem and handle follow-up questions. What should I use?"* Here is that message's
+entire journey.
 
-Two corpus-derived rules are baked into the synthesis prompt because they're where naive
-advisors go wrong ([prompts.rs](app/src-tauri/src/engine/advisor/prompts.rs)):
+#### S0 — Ontology match *(local, ~1 ms, no API)*
 
-- **The opposite-remedy trap** — "context *starved*" (fragments; fix by expanding) and
-  "context *polluted*" (noise; fix by shrinking) sound identical in user phrasing but
-  need opposite fixes. If S1 can't disambiguate, the advisor asks one question instead
-  of guessing.
+Before any model is called, your text is compared against a few dozen pre-embedded
+**failure-mode phrasings** shipped in the pack — sentences like *"chunks that mention my
+keywords outrank the one that actually answers."* Cosine similarity against these plus a
+keyword match produces a shortlist of failure modes your message might relate to.
+
+For a **planned use case** like the example, phrasings simply won't match strongly and
+this stage contributes nothing — by design. It's a free hint channel for
+symptom-shaped questions, not a gate: nothing downstream depends on it matching. When it
+*does* fire (a diagnosis question), the techniques known to address those failure modes
+get one extra "vote" in retrieval later.
+
+#### S1 — Intake *(1 call, small model)*
+
+One structured-output call to the cheap model (`command-r7b`) reads your message plus
+the conversation so far and returns a JSON analysis:
+
+- **`intent`** — `build` (you're planning something), `diagnose` (something's broken),
+  or `mixed`. This reframes everything downstream: a `build` question gets an
+  approach-shaped answer ("Recommended approach / Techniques to use / How they fit
+  together"), not a diagnosis-shaped one.
+- **`route`** — is this a new request, a follow-up needing fresh retrieval, a follow-up
+  about things already presented, an answer to a question the advisor asked, or just
+  chit-chat? (Chit-chat never spends API calls — a deterministic pre-filter catches
+  "thanks" before S1 even runs.)
+- **`standalone_query`** — your message rewritten as one self-contained search query,
+  with pronouns resolved from conversation history ("the second one" → the actual
+  technique name).
+- **`constraints`** — the requirements that change which techniques fit: *on-prem*,
+  *must handle follow-ups*, *cannot re-index*, *exact citations required*. For `build`
+  intent these **are** the problem statement, so extraction is thorough, and they
+  accumulate across the whole conversation.
+- **`clarifying_question`** — almost always null. The one case the advisor is allowed
+  to ask instead of answer: when your symptom is ambiguous between **opposite
+  remedies**. The corpus distinguishes context-*starved* (retrieved fragments are
+  missing their surroundings → fix by *expanding* context) from context-*polluted*
+  (irrelevant chunks crowd the window → fix by *shrinking* it). Users phrase both as
+  "my answers are bad," and a wrong guess recommends the exact opposite of the right
+  fix — so the advisor asks one short question.
+
+#### S2 — Planning *(1 call, big model; skipped on Quick)*
+
+The flagship model (`command-a`) turns the analyzed request into a **dossier plan**:
+
+- 3–5 **section titles** specific to your request (for the example: something like
+  *"Recommended architecture" / "On-prem model and store choices" / "Handling
+  follow-ups" / "How the pieces compose"*),
+- 3–6 **sub-questions** — the things the dossier must answer, phrased the way technical
+  documentation would phrase them (they become search queries),
+- 2–4 **rewrites** of the core request in different vocabulary, to catch corpus content
+  that words things differently.
+
+This is the "multi-query" insight: one embedding of your raw message would find *some*
+relevant content; a fan of targeted sub-questions finds the coverage a real answer needs.
+
+#### Embedding the fan *(1 call)*
+
+Every retrieval arm — standalone query, sub-questions, rewrites (plus, on Deep tier,
+the names of S0-matched failure modes) — is embedded in **one batched API call**
+(`embed-v4.0` accepts up to 96 texts).
+
+#### S3 — Retrieval fan-out *(local, ~10 ms per arm, no API)*
+
+Each arm now searches the packs **concurrently, on-device**. Per arm, per pack:
+
+1. **Dense**: the query vector searches two usearch HNSW indexes — technique *cards*
+   (the recommendation targets) and *chunks* (the evidence).
+2. **Sparse**: the same arm, sanitized into an FTS5 `MATCH` expression, runs BM25
+   keyword search — catching exact terms, API names, and rare tokens that embeddings
+   blur.
+3. **Fusion**: the ranked lists merge via Reciprocal Rank Fusion — a rank-based formula
+   that needs no score calibration, which matters because cosine scores and BM25 scores
+   live on incomparable scales. The S0 ontology shortlist joins as one more ranked list,
+   so failure-mode knowledge is literally just *one voice among several*.
+4. **Graph expansion**: for the top fused cards, the engine walks the pack's typed
+   relation graph one hop — `alternative_to`, `prerequisite_of`, `composes_with` — and
+   adds neighbors similarity search under-ranks. This is where "you'll also need a
+   reranker before segment extraction" and "X is the managed-service alternative to Y"
+   come from.
+
+Results from all arms merge (a chunk found by three different sub-questions is a strong
+signal), and exact float32 cosine over the pack's stored vectors re-orders the fused
+candidates — fusion *selects*, exact similarity *ranks*.
+
+#### S4 — Rerank & select *(1 call)*
+
+The merged evidence — typically 30–40 chunks — goes to Cohere's cross-encoder reranker
+(`rerank-v4.0-pro`) in a single call, scored against your standalone query. A
+cross-encoder reads query and document *together*, so it's far more precise than the
+embedding similarity that produced the candidates. Then, locally:
+
+- **Adaptive-k**: instead of keeping a fixed top-N, the list is cut at the score
+  *cliff* — where relevance drops sharply — so weak evidence never pads the context.
+- **Diversity caps**: at most 2–3 chunks per technique, so one well-documented
+  technique can't crowd out the comparison the dossier needs.
+- **Token budget**: evidence is capped (~14k tokens) so synthesis always has headroom.
+
+#### S5 — The sufficiency gate *(1 call, small model; skipped on Quick)*
+
+Here's a failure mode of naive RAG advisors: retrieved chunks can be *relevant* yet
+*insufficient* — on-topic but not actually containing the answer — and language models
+confidently hallucinate the gap shut. So before writing anything, one batched call asks
+the small model, per sub-question: **is this evidence sufficient to answer it
+faithfully?**
+
+For each insufficient verdict, the engine re-queries **locally** (free — retrieval is
+on-device) using the grader's "what's missing" description, and adds what it finds. If
+coverage is still thin, that sub-question becomes an honest **gaps note** in the final
+answer — *"the knowledge packs have thin coverage on X"* — instead of invented prose.
+
+#### S6 — Evidence assembly *(local)*
+
+The surviving evidence is packaged for the synthesis call: each excerpt gets a stable
+citation id (`pack:chunk:187`), a title (`technique — section`), and a position —
+strongest material first *and* last ("sandwich" ordering, because models attend least to
+the middle of long contexts). The top technique **cards** are included as citable
+documents too, so the final answer can cite the curated card, not just raw notebook text.
+
+#### S7 — Grounded synthesis *(1 call, big model; per-section on Deep)*
+
+The flagship model writes the dossier in Cohere's **documents mode**: it can only ground
+claims in the documents provided, and the API returns **character-span citations** —
+"characters 210–290 of the answer are supported by `rag-techniques:chunk:187`." That's
+what powers click-to-highlight in the UI, with no regex heuristics.
+
+The prompt carries your constraints verbatim, the intent framing, and two rules distilled
+from the corpus analysis (where naive advisors reliably go wrong):
+
+- **Tie every recommendation to the specific requirement or symptom it serves** — no
+  generic technique dumps.
 - **The escalation ladder** — reranking → reliable RAG → CRAG → Self-RAG → agentic RAG
-  are *steps*, never stacked together.
+  are alternatives at increasing complexity, *never* stacked together — plus the
+  relation notes between candidates ("A is a prerequisite of B") so composition advice
+  is graph-informed, not vibes.
+
+#### S8 — Verification *(1 call, small model; skipped on Quick)*
+
+Two layers. First, **zero-cost integrity**: every citation's span is checked against the
+answer text and its document id against what was actually sent (anything invalid is
+dropped, never rendered). Second, a **claim-level critic**: the small model reads the
+finished dossier against the evidence and judges, per recommended technique, whether the
+stated fit is actually supported. Each recommendation's **confidence meter** is a blend
+of retrieval strength, rerank score, and critic verdict — so a technique that merely
+*sounded* right gets visibly lower confidence than one the evidence backs.
+
+#### S9 — Persist & cache *(local)*
+
+The advisory is stored as validated JSON (history re-renders offline, forever), the
+evidence pool is cached on the conversation so follow-ups like *"tell me more about the
+second one"* reuse it with **zero** new retrieval calls, and a compact trace (route,
+queries, retrieval ids, models, latency, validation results) is written for debugging.
+Title generation and history summarization happen asynchronously after your answer is
+already on screen.
+
+#### Cost summary
+
+| Tier | Stages active | LLM calls | Rerank | Embed |
+|---|---|---|---|---|
+| **Quick** | S0, S1, S3, S4, S6, S7, S9 | ~2–3 | 1 | 1 |
+| **Balanced** *(default)* | everything, once | ~5–7 | 1 | 1 |
+| **Deep** | + ontology fan-out arms, corrective re-grading, per-section synthesis and repair | ~12+ | 1–3 | 1 |
+
+**Tiers are configuration, not code paths** — the same state machine, with stages
+enabled or repeated.
 
 A pleasing symmetry: the pipeline itself implements 14+ of the techniques it recommends
-(RAG-fusion, HyDE, CRAG grading, Self-RAG-style critique, adaptive retrieval, reranking,
+(RAG-fusion, CRAG grading, Self-RAG-style critique, adaptive retrieval, reranking,
 contextual chunk headers, graph-informed retrieval…).
 
 ### Degradation model
