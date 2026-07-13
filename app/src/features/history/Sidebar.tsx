@@ -45,7 +45,7 @@ export function Sidebar({
 
   return (
     <nav
-      className="flex h-full w-60 flex-col border-r border-edge bg-surface"
+      className="flex h-full w-full flex-col border-r border-edge bg-surface"
       aria-label="Conversation history"
     >
       <div className="flex items-center justify-between gap-2 p-[length:var(--sp-2)]">

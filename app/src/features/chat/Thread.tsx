@@ -57,10 +57,25 @@ export function Thread({
   onExample: (prompt: string) => void;
 }) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const nearBottom = useRef(true);
+  const lastCount = useRef(turns.length);
 
+  // Reader-respecting autoscroll: your own message follows you to the bottom;
+  // a finished advisory scrolls its BEGINNING into view (you read top-down),
+  // and nothing moves at all if you've scrolled away to read something else.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [turns.length, stage]);
+    const grew = turns.length > lastCount.current;
+    lastCount.current = turns.length;
+    if (!grew) return;
+    const last = turns[turns.length - 1];
+    if (last?.role === "user") {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    } else if (nearBottom.current) {
+      const el = containerRef.current?.querySelector(`[data-turn="${last?.id}"]`);
+      el?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [turns]);
 
   if (turns.length === 0 && !busy) {
     return (
@@ -94,12 +109,22 @@ export function Thread({
   }
 
   return (
-    <div className="h-full overflow-y-auto" role="log" aria-label="Conversation">
+    <div
+      ref={containerRef}
+      onScroll={(e) => {
+        const el = e.currentTarget;
+        nearBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 140;
+      }}
+      className="h-full overflow-y-auto"
+      role="log"
+      aria-label="Conversation"
+    >
       <div className="mx-auto grid max-w-3xl gap-[length:var(--sp-5)] p-[length:var(--sp-4)] pb-[length:var(--sp-6)]">
         <AnimatePresence initial={false}>
           {turns.map((turn) => (
             <motion.article
               key={turn.id}
+              data-turn={turn.id}
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}

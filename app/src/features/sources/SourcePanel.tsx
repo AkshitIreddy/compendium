@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import { ipc } from "../../lib/ipc";
 import type { NotebookCell, PackDocument, Technique } from "../../lib/types";
@@ -127,6 +127,13 @@ export function SourcePanel({
   const [doc, setDoc] = useState<PackDocument | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<"card" | "document">("card");
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // A new source or view starts reading from the top — never inherit the
+  // previous document's scroll offset. (Cited-cell focus then scrolls itself.)
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [request, view]);
 
   useEffect(() => {
     let cancelled = false;
@@ -174,7 +181,7 @@ export function SourcePanel({
       initial={{ x: 32, opacity: 0 }}
       animate={{ x: 0, opacity: 1 }}
       transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-      className="flex h-full min-w-0 flex-col border-l border-edge bg-surface"
+      className="flex h-full w-full min-w-0 flex-col border-l border-edge bg-surface"
       aria-label="Source panel"
     >
       <header className="flex items-center justify-between gap-2 border-b border-edge px-[length:var(--sp-3)] py-[length:var(--sp-2)]">
@@ -214,7 +221,7 @@ export function SourcePanel({
         </button>
       </header>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-[length:var(--sp-4)]">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-[length:var(--sp-4)]">
         {error && <p className="text-[length:var(--text-sm)] text-danger">{error}</p>}
         {!error && view === "card" && technique && (
           <TechniqueDetail technique={technique} onOpenNotebook={() => setView("document")} />

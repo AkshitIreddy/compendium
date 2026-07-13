@@ -3,7 +3,6 @@ import type { Advisory, Recommendation, SpanCitation } from "../../lib/types";
 import { ipc } from "../../lib/ipc";
 import { CitedMarkdown } from "./CitedMarkdown";
 import { RecommendationCard } from "./RecommendationCard";
-import { SafeHtml } from "../../components/SafeHtml";
 
 export interface SourceRequest {
   packId: string;
@@ -162,13 +161,6 @@ export const AdvisoryView = memo(function AdvisoryView({
         </div>
       )}
 
-      {advisory.attribution_html.length > 0 && advisory.answer_md && (
-        <footer className="border-t border-edge pt-2 text-[length:var(--text-xs)] text-muted">
-          {advisory.attribution_html.map((a, i) => (
-            <SafeHtml key={i} html={a} />
-          ))}
-        </footer>
-      )}
     </div>
   );
 });

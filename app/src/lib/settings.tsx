@@ -25,6 +25,8 @@ export interface UiSettings {
   soundVolume: number; // 0-1
   soundEvents: Record<SoundEvent, boolean>;
   sourcePanelSide: "right" | "bottom";
+  sidebarWidth: number; // px
+  sourcePanelWidth: number; // px
   tier: Tier;
   clarifyingQuestions: boolean;
 }
@@ -41,6 +43,8 @@ export const DEFAULTS: UiSettings = {
   soundVolume: 0.5,
   soundEvents: DEFAULT_SOUND_PREFS.events,
   sourcePanelSide: "right",
+  sidebarWidth: 240,
+  sourcePanelWidth: 460,
   tier: "balanced",
   clarifyingQuestions: true,
 };

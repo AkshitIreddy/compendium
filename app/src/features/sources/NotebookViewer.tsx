@@ -82,10 +82,12 @@ export const NotebookViewer = memo(function NotebookViewer({
           aria-description={
             focusSet.has(i) && highlightText ? `Cited: ${highlightText}` : undefined
           }
-          className={`rounded-[length:var(--radius-md)] transition-token ${
+          className={`rounded-[length:var(--radius-md)] border p-[length:var(--sp-3)] transition-token ${
             focusSet.has(i)
-              ? "ring-2 ring-accent bg-accent-subtle/20 p-2 -m-0.5"
-              : ""
+              ? "border-accent ring-1 ring-accent bg-accent-subtle/20"
+              : cell.t === "code"
+                ? "border-edge bg-inset/60"
+                : "border-edge bg-surface"
           }`}
         >
           {cell.t === "md" ? (

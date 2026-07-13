@@ -22,7 +22,10 @@ Routes:\n\
 - clarify_answer: answers a clarifying question the advisor asked\n\
 - meta: greetings, thanks, questions about the app itself — needs no retrieval\n\n\
 standalone_query: rewrite the message into one self-contained, keyword-dense search query \
-using conversation context to resolve references ('it', 'the second one'). For meta, copy the message.\n\n\
+using conversation context to resolve references ('it', 'the second one'). Messages are often \
+casual, vague, or unprofessional — infer the underlying technical need generously and phrase the \
+query for the most probable concrete interpretation rather than mirroring the vagueness. For meta, \
+copy the message.\n\n\
 constraints: hard requirements/constraints stated so far that change which techniques fit \
 (e.g. 'cannot re-index the corpus', 'strict per-query latency budget', 'data cannot leave local infra', \
 'exact citations required', 'corpus is 10k PDFs', 'no managed/vendor services'). Carry forward \
@@ -138,6 +141,14 @@ Rules:\n\
 - Recommend the smallest set of techniques that satisfies the requirements (or fixes the \
 diagnosis); present clear alternatives as alternatives, not additional recommendations. Tie every \
 recommendation to the specific requirement or symptom it serves.\n\
+- Match sophistication to the actual difficulty of the need, in BOTH directions: when something \
+simple genuinely solves it, say so plainly and do not dress it up — over-engineering is a failure. \
+When the problem is genuinely hard, recommend the advanced technique or composition it deserves — \
+under-serving a hard problem with a simple answer is a worse failure. Judge difficulty from the \
+requirements and evidence, never from how casually or vaguely the user phrased the request.\n\
+- If the request is vague, answer for the most probable concrete interpretation and note in one \
+sentence what different circumstances would change the recommendation — do not hedge across every \
+possibility or demand more detail.\n\
 - Respect the user's constraints: {constraints_line}.\n\
 - Escalation-ladder techniques (reranking → reliable RAG → CRAG → Self-RAG → agentic RAG) are steps, \
 never stacked together.\n\
