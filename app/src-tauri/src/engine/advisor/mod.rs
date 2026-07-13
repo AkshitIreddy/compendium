@@ -211,6 +211,8 @@ pub async fn ask(
                     let still: Vec<String> = missing
                         .iter()
                         .filter_map(|m| m.missing.clone())
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
                         .collect();
                     if !still.is_empty() {
                         gaps = Some(format!(
