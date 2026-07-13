@@ -1,74 +1,604 @@
+<div align="center">
+
+<img src="assets/icon.png" width="140" alt="Compendium icon — a fanned stack of technique cards with a best-fit check" />
+
 # Compendium
 
-A desktop **problem → method advisor** for technical practitioners. Describe the problem
-you're facing in plain English — a one-line symptom or a detailed overview — and
-Compendium's advisor pipeline reasons over curated, offline-prepared knowledge packs to
-produce a **cited knowledge dossier**: best-fit techniques with per-problem justification
-and confidence, honest tradeoffs, supporting excerpts viewable in-app with span-accurate
-citation highlighting, and a one-click export built to be handed to another AI as
-grounding for implementing the fix.
+**Describe the problem you're facing. Get the best-fit techniques — with receipts.**
 
-## How it works
+A Windows desktop advisor that reasons over curated, offline-built knowledge packs and
+answers with cited, exportable knowledge dossiers.
 
-- **Curated over open**: knowledge is prepared, vetted, and embedded offline by the
-  build pipeline, then shipped as versioned read-only **packs** (single SQLite files
-  with prebuilt usearch HNSW indexes and FTS5). The app never embeds corpus content on
-  your machine — at runtime it only processes your queries via your own Cohere key
-  (free trial tier works; stored in the Windows Credential Manager).
-- **The advisor pipeline** is a 10-stage state machine composed from the best method
-  per stage (surveyed in [research/advisor-pipeline.md](research/advisor-pipeline.md)):
-  ontology-guided intake with clarifying questions → query planning → multi-arm hybrid
-  retrieval with typed-graph expansion → rerank + diversity selection → sufficiency
-  grading with an honest-gap path → grounded synthesis with native span citations →
-  claim-level verification → dossier assembly. Three depth tiers (Quick/Balanced/Deep)
-  share the architecture; every API failure degrades to a local advisory rather than
-  losing the turn. The app implements many of the very techniques it recommends.
-- **Chat with memory**: pinned problem statement, sliding window, async-folded
-  summaries, and evidence reuse make follow-ups cheap and coherent.
+[![Version](https://img.shields.io/badge/version-0.1.0-6E56CF?style=flat-square)](https://github.com/AkshitIreddy/compendium/releases/tag/v0.1.0)
+[![Platform](https://img.shields.io/badge/platform-Windows%20x64-0078D4?style=flat-square&logo=windows)](https://github.com/AkshitIreddy/compendium/releases)
+[![License](https://img.shields.io/badge/license-free%20%C2%B7%20non--commercial-2E7D32?style=flat-square)](#-license--attribution)
+[![Tauri](https://img.shields.io/badge/Tauri-2.x-FFC131?style=flat-square&logo=tauri&logoColor=white)](https://tauri.app)
+[![Rust](https://img.shields.io/badge/engine-Rust-B7410E?style=flat-square&logo=rust)](app/src-tauri)
+[![React](https://img.shields.io/badge/UI-React%2019-61DAFB?style=flat-square&logo=react&logoColor=black)](app/src)
+[![Python](https://img.shields.io/badge/pipeline-Python%203.12-3776AB?style=flat-square&logo=python&logoColor=white)](pipeline)
 
-## v1 knowledge packs (bundled)
+[Install](#-installation) · [How it works](#-how-it-works) · [Architecture](#-architecture) ·
+[The advisor pipeline](#-the-advisor-pipeline) · [Pack format](#-knowledge-pack-format) ·
+[Build pipeline](#-the-offline-build-pipeline) · [Contributing](docs/CONTRIBUTING.md)
+
+</div>
+
+---
+
+## 💡 What is Compendium?
+
+You're building a RAG system and something's wrong. *"My retriever finds chunks with the
+right keywords, but the answers keep missing the point."* You know the fix exists — it's
+somewhere across 44 technique notebooks, three sets of framework docs, and a dozen papers
+you haven't read.
+
+Compendium is a desktop app that already read all of it. Describe your problem in plain
+English — one line or a full page — and it answers with:
+
+- **Best-fit techniques**, ranked with per-problem justification and a confidence meter
+- **Span-accurate citations** — click any highlighted claim to open the exact notebook
+  cells or docs section that back it, rendered beautifully in-app
+- **Honest tradeoffs and gaps** — it tells you what each fix costs, and says plainly when
+  its knowledge doesn't cover your case
+- **A one-click dossier export** — a self-contained markdown bundle (recommendations,
+  cited prose, verbatim evidence appendix) built to be pasted into any other AI as
+  grounding for implementing the fix
+
+The knowledge is **curated, not crowdsourced**: packs are prepared, vetted, and embedded
+offline by a build pipeline, then shipped read-only inside the installer. Your machine
+never embeds corpus content — at runtime the app only processes *your* queries, using
+*your own* Cohere API key (the free trial tier is enough for ~100+ advisories a month).
+
+### What ships in v1
 
 | Pack | Contents |
 |---|---|
-| **RAG Techniques** | 39 techniques + 5 evaluation methodologies from [NirDiamant/RAG_Techniques](https://github.com/NirDiamant/RAG_Techniques), analyzed into structured cards with a 25-failure-mode ontology and typed relation graph |
-| **Framework Docs** | 155 pages of current LangChain, LangGraph, and LangSmith documentation scoped to retrieval, agentic RAG, memory, evaluation, observability, and prompt engineering |
+| 📚 **RAG Techniques** | 39 techniques + 5 evaluation methodologies from [NirDiamant/RAG_Techniques](https://github.com/NirDiamant/RAG_Techniques), analyzed into structured cards with a 25-failure-mode ontology and a typed relation graph |
+| 📖 **Framework Docs** | 155 pages of current LangChain, LangGraph, and LangSmith documentation, scoped to retrieval, agentic RAG, memory, evaluation, observability, and prompt engineering |
 
-New subject areas are added as new packs — see [docs/CONTRIBUTING.md](docs/CONTRIBUTING.md).
+New subject areas arrive as new packs — the core is entirely pack-agnostic.
 
-## Repository layout
+---
 
-| Path | Contents |
-|---|---|
-| `app/` | Tauri 2 app — React 19 UI (`src/`), Rust engine (`src-tauri/`: pack loading, hybrid search, advisor pipeline, key storage) |
-| `pipeline/` | Offline pack build pipeline (Python): source-type processors, embedding, index build, validation |
-| `docs/` | [Architecture plan](docs/PLAN.md) · [Pack format spec](docs/PACK_FORMAT.md) · [Contributor guide](docs/CONTRIBUTING.md) |
-| `research/` | Phase-1 research: technique cards, ontology, and evidence-backed platform reports |
+## 📦 Installation
 
-## Development
+1. **Download** [`Compendium_0.1.0_x64-setup.exe`](https://github.com/AkshitIreddy/compendium/releases/tag/v0.1.0) (~18 MB — both knowledge packs included).
+2. **Run it.** Windows SmartScreen will warn once because the installer is unsigned —
+   click *More info → Run anyway*. It installs per-user (no admin prompt) and takes
+   seconds.
+3. **Add your Cohere key** when the app asks. Get a free one at
+   [dashboard.cohere.com/api-keys](https://dashboard.cohere.com/api-keys) — the trial
+   tier covers roughly 100+ Balanced-depth advisories per month. The key is stored in the
+   **Windows Credential Manager**, never in a file, and never leaves your machine except
+   to call Cohere.
+4. **Ask something.** Try one of the example prompts on the empty screen, or describe
+   your actual problem.
+
+> **No key? No problem.** Compendium still works in *local match mode*: ranked technique
+> suggestions from the on-device index (keyword + ontology matching), with full source
+> browsing. You just won't get the LLM-written advisory prose.
+
+### Everyday use
+
+- **Depth tiers** — pick per question in the composer: **Quick** (~3 API calls),
+  **Balanced** (~7, the default), **Deep** (~12+, adds corrective retrieval loops and
+  per-section verification). A usage meter in Settings tracks your monthly calls.
+- **Citations** — highlighted spans in the answer are clickable; the source panel opens
+  the exact notebook cells or docs heading, with provenance and a link to the original.
+- **Follow-ups** — the conversation has real memory. "What about the second option?" or
+  "we can't re-index, does that change things?" just work.
+- **Export** — *Copy dossier for another AI* puts a complete, cited, self-contained
+  markdown bundle on your clipboard.
+- **Make it yours** — Settings (⌘ the gear, or `Ctrl+,`): four themes + system, any
+  accent hue (contrast-safe by construction), density, text scale, motion intensity,
+  optional UI sounds. Everything applies live. `Ctrl+K` opens the command palette.
+
+---
+
+<div align="center">
+
+## 🔬 For developers: the deep end starts here
+
+*Everything below is implementation detail — how the engine, packs, pipeline, and UI
+actually work, with real code from the repo.*
+
+</div>
+
+---
+
+## 🗺 How it works
+
+The system is three programs sharing one contract (the pack format):
+
+```mermaid
+flowchart LR
+    subgraph OFFLINE["🏗 Offline (developer machine, build time)"]
+        SRC["Sources<br/>(notebooks · docs sites)"] --> PROC["Source-type processors<br/>(notebook.py · webdocs.py)"]
+        CUR["Curation layer<br/>(technique cards + ontology)"] --> PROC
+        PROC --> EMB["Cohere embed-v4.0<br/>(content-hash cached)"]
+        EMB --> IDX["usearch f16 HNSW build<br/>(recall@10 ≥ 0.98 gate)"]
+        IDX --> PACK[("*.pack<br/>single SQLite file")]
+    end
+
+    subgraph APP["🖥 Compendium.exe (user machine, runtime)"]
+        direction TB
+        UI["React 19 webview<br/>chat · dossiers · source viewer"]
+        ENGINE["Rust engine<br/>hybrid search · advisor S0–S9<br/>key store · history"]
+        UI <-->|"typed IPC<br/>commands + events"| ENGINE
+    end
+
+    PACK -->|"bundled in installer,<br/>ATTACHed read-only"| ENGINE
+    ENGINE <-->|"user's key only:<br/>embed · rerank · chat"| COHERE["Cohere v2 API"]
+```
+
+Three invariants hold everywhere:
+
+1. **Packs are read-only forever.** User data lives in a separate WAL database; upgrading
+   a pack means replacing a file.
+2. **The corpus is never embedded at runtime.** Only user queries are (with the *same*
+   model/dims the pack was built with — enforced at pack load).
+3. **No turn is ever lost.** Every API failure — outage, quota, malformed response —
+   degrades to a locally-computed advisory instead of an error.
+
+### Repository layout
 
 ```
-# packs (offline; needs COHERE_API_KEY_PRODUCTION in .env)
+compendium/
+├── app/
+│   ├── src/                    React 19 UI
+│   │   ├── design/             OKLCH token system + WCAG contrast CI
+│   │   ├── features/           chat · sources · history · settings · palette
+│   │   └── lib/                typed IPC, settings, Shiki, Web Audio
+│   └── src-tauri/              Rust engine
+│       ├── src/engine/
+│       │   ├── pack.rs         pack loading, usearch restore + self-heal
+│       │   ├── search.rs       hybrid retrieval: dense + BM25 + RRF + graph
+│       │   ├── cohere.rs       typed v2 client, pacing, quota semantics
+│       │   ├── advisor/        the S0–S9 pipeline, context manager, export
+│       │   ├── appdb.rs        conversations · traces · settings · quota
+│       │   └── keys.rs         Windows Credential Manager
+│       └── tests/              engine + live-API integration tests
+├── pipeline/                   Python pack builder
+│   ├── compendium_pack/        recipe → process → embed → index → validate
+│   │   └── processors/         notebook.py (reference) · webdocs.py
+│   └── packs/                  recipes + curation data per pack
+├── docs/                       PLAN.md · PACK_FORMAT.md · CONTRIBUTING.md
+└── research/                   Phase-1 corpus analysis + platform reports
+```
+
+---
+
+## 🧠 The advisor pipeline
+
+The heart of the app is a **fixed state machine** in
+[`engine/advisor/mod.rs`](app/src-tauri/src/engine/advisor/mod.rs) — ten stages, composed
+from the best-performing method per stage after a survey of the 2025–26 literature and
+production systems ([full survey](research/advisor-pipeline.md)). The LLM plans and
+judges *inside* stages; it never invents the pipeline per query.
+
+The design exploits one unusual property: retrieval is **local and ~10 ms**, so the
+deep-research pattern (plan → parallel retrieval fan-out → grade → synthesize → verify)
+dominates the interleaved agent loops that exist to ration expensive retrieval —
+"searchers" here are concurrent Rust functions, not LLM calls.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as User
+    participant E as Rust engine
+    participant P as Packs (local, ~10ms)
+    participant C as Cohere API
+
+    U->>E: "answers keep missing the point…"
+    E->>P: S0 ontology match (pre-embedded failure-mode phrasings)
+    E->>C: S1 intake — route · rewrite · constraints · clarify? (R7B, JSON schema)
+    E->>C: S2 plan — dossier outline + sub-questions + rewrites (Command A)
+    E->>C: embed all retrieval arms (one batched call)
+    par per arm, concurrently
+        E->>P: S3 hybrid retrieval: usearch + FTS5 → RRF → graph expansion
+    end
+    E->>C: S4 rerank merged candidates (rerank-v4.0-pro, one call)
+    E->>C: S5 sufficiency gate (R7B) — insufficient? corrective local re-query
+    E->>C: S7 grounded synthesis, documents mode → native span citations
+    E->>C: S8 claim-level critic (R7B) → per-recommendation confidence
+    E->>U: S9 advisory: cited dossier + cards + evidence (cached for follow-ups)
+```
+
+| Stage | What happens | Cost |
+|---|---|---|
+| **S0** | User text scored against pre-embedded failure-mode phrasings + keyword FTS — a zero-LLM symptom matcher | local |
+| **S1** | One combined intake call: route (5-way), standalone query rewrite, constraint extraction, failure-mode confirmation, **starved-vs-polluted disambiguation**, ≤1 clarifying question | 1× R7B |
+| **S2** | Dossier outline + sub-questions + diverse rewrites (skipped on Quick) | 1× Command A |
+| **S3** | Per-arm hybrid retrieval with cross-arm merge (details below) | local |
+| **S4** | Rerank merged evidence → adaptive-k cut at the score cliff → per-technique diversity caps | 1× rerank |
+| **S5** | Batched CRAG-style sufficiency verdicts per sub-question; failures trigger a **zero-API corrective re-query** using the grader's "missing" terms; still-thin coverage becomes an honest *gaps* note | 1× R7B |
+| **S6** | Evidence assembly: stable anchors, per-card token budgets, sandwich ordering | local |
+| **S7** | Synthesis in Cohere documents mode — technique cards are citable documents alongside chunks, so citations land on both | 1× Command A |
+| **S8** | Local citation-integrity check, then a claim-level critic; confidence = retrieval strength ⊕ rerank ⊕ critic verdict | 1× R7B |
+| **S9** | Advisory JSON persisted (offline re-renderable), evidence cached for follow-up reuse, trace written | local |
+
+**Tiers are configuration, not code paths** — Quick skips S2/S5/S8 (~3 calls), Balanced
+runs everything once (~7), Deep adds ontology fan-out arms and corrective loops (~12+).
+
+Two corpus-derived rules are baked into the synthesis prompt because they're where naive
+advisors go wrong ([prompts.rs](app/src-tauri/src/engine/advisor/prompts.rs)):
+
+- **The opposite-remedy trap** — "context *starved*" (fragments; fix by expanding) and
+  "context *polluted*" (noise; fix by shrinking) sound identical in user phrasing but
+  need opposite fixes. If S1 can't disambiguate, the advisor asks one question instead
+  of guessing.
+- **The escalation ladder** — reranking → reliable RAG → CRAG → Self-RAG → agentic RAG
+  are *steps*, never stacked together.
+
+A pleasing symmetry: the pipeline itself implements 14+ of the techniques it recommends
+(RAG-fusion, HyDE, CRAG grading, Self-RAG-style critique, adaptive retrieval, reranking,
+contextual chunk headers, graph-informed retrieval…).
+
+### Degradation model
+
+Every fallible stage has a designed fallback — the turn always completes:
+
+| Failure | Behavior |
+|---|---|
+| No API key | Local match mode: BM25 + ontology ranking, full source browsing |
+| Embed/synthesis call fails (outage, quota) | Degrades to local advisory, *keeping* any retrieval work already done |
+| Intake/planner/grader/critic fails | Stage-specific fallback (default route, single-arm plan, skip gate/critic) |
+| Rerank fails | Exact-cosine ordering stands in |
+| Monthly trial cap hit | Typed `QuotaExhausted` error → clear UI explanation + usage meter |
+
+This wasn't theoretical: Cohere's embed endpoint had a multi-hour outage during
+development, and every turn degraded gracefully in production shape.
+
+---
+
+## 🔍 Local retrieval internals
+
+[`engine/search.rs`](app/src-tauri/src/engine/search.rs) runs entirely on-device in
+single-digit milliseconds against 2,600 chunks (tested headroom to ~50k+).
+
+**Candidate generation** fuses up to four ranked voices per pack with Reciprocal Rank
+Fusion — calibration-free, which matters because the voices' scores aren't comparable:
+
+```rust
+const RRF_K: f64 = 60.0;
+
+fn rrf_fuse(rank_lists: &[Vec<u64>]) -> HashMap<u64, f64> {
+    let mut scores: HashMap<u64, f64> = HashMap::new();
+    for list in rank_lists {
+        for (rank, key) in list.iter().enumerate() {
+            *scores.entry(*key).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+        }
+    }
+    scores
+}
+```
+
+The four voices:
+
+1. **Dense** — usearch HNSW over Cohere embeddings (cards and chunks are separate tiers)
+2. **Sparse** — SQLite FTS5/BM25, prebuilt at pack build time, with a sanitizer that turns
+   natural language into a safe `MATCH` expression (quoted terms, stopwords stripped)
+3. **Ontology** — techniques addressing the top S0-matched failure modes join card fusion
+   as their own ranked voice (deduplicated to preserve RRF's one-vote-per-list semantics)
+4. **Graph** *(post-fusion)* — 1-hop expansion along typed edges (`alternative_to`,
+   `prerequisite_of`, `composes_with`, `refines`, `evaluated_by`), which surfaces the
+   alternatives and prerequisites similarity search systematically under-ranks — the main
+   source of honest "tradeoffs" content
+
+**Precision step**: fusion *selects* the candidate set; exact f32 cosine over the pack's
+vectors-of-record *orders* it (and later, Cohere rerank refines the top). Chunks are
+fetched on demand — no vector matrix is held in RAM.
+
+Cosines are comparable across packs (same embedding model — enforced at load), so
+multi-pack merging is a plain sort.
+
+---
+
+## 📦 Knowledge pack format
+
+One pack = **one SQLite file**. Full spec: [docs/PACK_FORMAT.md](docs/PACK_FORMAT.md);
+the DDL's source of truth is [`pipeline/compendium_pack/writer.py`](pipeline/compendium_pack/writer.py).
+
+```sql
+PRAGMA application_id = 0x434D5044;  -- 'CMPD': reject non-pack files cheaply
+PRAGMA user_version   = 1;           -- schema version gate
+
+CREATE TABLE manifest (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+-- required: pack identity, embedding_model + dims + input_type,
+-- license_id/license_text/attribution_html (packs without attribution
+-- REFUSE TO LOAD — license compliance is structural), source_ref, counts
+
+CREATE TABLE techniques (          -- the recommendation targets
+  slug TEXT PRIMARY KEY, card_key INTEGER UNIQUE,   -- usearch key
+  title, one_liner, stage_id → stages, complexity,
+  problem_solved, how_it_works, when_to_use JSON, tradeoffs JSON,
+  summary,                          -- embedding-ready ~150 words
+  vendor_disclosure,                -- sponsor-affiliated? rendered as a chip
+  document_id → documents
+);
+
+CREATE TABLE failure_modes (id, name, description, phrasings JSON);
+CREATE TABLE technique_relations (from_slug, to_slug,
+  relation CHECK (relation IN ('composes_with','alternative_to',
+                               'prerequisite_of','refines','evaluated_by')));
+
+CREATE TABLE chunks (id INTEGER PRIMARY KEY,      -- usearch key
+  document_id, technique_slug, heading_path, kind,
+  text,           -- embedded text (contextual header prepended)
+  display_text,   -- rendered text (no header)
+  location);      -- {"cells":[a,b]} | {"anchor":"#…"} → citation deep-links
+
+-- float32 LE, L2-normalized: the VECTORS OF RECORD
+CREATE TABLE card_embeddings  (technique_slug PRIMARY KEY, vector BLOB);
+CREATE TABLE chunk_embeddings (chunk_id       PRIMARY KEY, vector BLOB);
+CREATE TABLE phrasing_embeddings (failure_mode_id, phrasing, vector BLOB);
+
+-- serialized usearch HNSW indexes (f16, cos), one row per tier
+CREATE TABLE vector_indexes (tier PRIMARY KEY, usearch_version,
+  dims, connectivity, expansion_add, expansion_search,
+  count, recall_at_10, sha256, blob BLOB);
+
+CREATE VIRTUAL TABLE chunks_fts USING fts5(text, heading_path,
+  content='chunks', content_rowid='id');   -- PREBUILT + optimized
+```
+
+### Why ship both vectors *and* indexes?
+
+The f32 blobs are canonical; the f16 HNSW indexes are **derived artifacts**. That buys
+three things:
+
+1. **Exact re-scoring** of fused candidates (makes the f16 quantization effectively free)
+2. **Self-healing**: usearch has no cross-version serialization guarantee, so the version
+   is pinned in lockstep (`requirements.txt` ↔ `Cargo.toml`) *and* any hash/version/load
+   mismatch triggers an automatic rebuild from the stored vectors instead of a crash:
+
+```rust
+// engine/pack.rs — load path
+let hash_ok = hex::encode(Sha256::digest(&blob)) == expected_sha;
+if hash_ok {
+    if let Ok(index) = new_index(&opts) {
+        if index.load_from_buffer(&blob).is_ok() && index.size() == count as usize {
+            return Ok((index, false));
+        }
+    }
+}
+// Self-heal: the f32 embeddings are the vectors of record.
+let index = rebuild_index(conn, tier, dims, &opts)?;
+Ok((index, true))
+```
+
+3. **Model-mismatch safety**: a pack built with different embedding model/dims than the
+   runtime queries with would produce silent garbage similarity — so it's refused at load
+   with an explicit error.
+
+The Python↔Rust round-trip (build index in Python, `load_from_buffer` in Rust) was
+spike-verified **byte-identical** on Windows before any engine code was written.
+
+---
+
+## 🏗 The offline build pipeline
+
+```mermaid
+flowchart TD
+    R["recipe.toml<br/>identity · source_type · license (mandatory) · index params"] --> D{source_type}
+    D -->|notebook| N["notebook.py<br/>nbformat parse → section tree →<br/>code-intact chunking → output sanitization"]
+    D -->|webdocs| W["webdocs.py<br/>sitemap → allowlist → per-page .md →<br/>heading-aware chunking"]
+    N --> M["curation merge<br/>(vetted cards + ontology are authoritative)"]
+    W --> M
+    M --> E["embedder.py — Cohere embed-v4.0<br/>sha256 content cache: unchanged content = 0 API calls"]
+    E --> I["indexer.py — usearch f16 HNSW<br/>FAIL BUILD if recall@10 < 0.98 vs exact search"]
+    I --> V["validator.py — 20+ checks:<br/>integrity, FKs, vector dims, FTS round-trip,<br/>index sha/self-query, license fields"]
+    V --> P[("*.pack")]
+```
+
+**Processors own the "raw sources → vetted knowledge" logic for their type** — nothing
+one-size-fits-all in the core. Two ship today; a PDF processor would be a third module
+following the same shape ([guide](docs/CONTRIBUTING.md)).
+
+<details>
+<summary><b>Notebook processor</b> (the reference implementation) — what "notebook-aware" means concretely</summary>
+
+- Markdown cells split at headers into a **section tree**; every chunk carries its
+  `heading_path` and the exact **cell range** it came from (citation deep-links)
+- **Code cells are never split mid-block**; giant cells split at top-level `def`/`class`
+  boundaries, then at method boundaries with a `# class X (continued)` context prefix
+- Header parsing is **fence-aware** (`#` comment lines inside code blocks aren't headers)
+- Install/API-key boilerplate and the repo's promo banners are excluded from *chunks* but
+  kept in *documents* — retrieval sees signal, the source viewer stays faithful
+- Outputs are whitelisted and size-capped (`text/plain` ≤2 KB, `text/html` ≤50 KB —
+  sanitized again with DOMPurify at render, defense in depth — `image/png` ≤200 KB)
+- Every chunk's embedded text gets a contextual header — the corpus's own
+  *contextual_chunk_headers* technique applied to itself:
+
+```python
+embed_text = f"Technique: {card['title']} — Section: {chunk.heading_path}\n\n{chunk.body}"
+```
+</details>
+
+<details>
+<summary><b>Webdocs processor</b> — acquisition that survives docs reorganizations</summary>
+
+Verified the hard way (docs.langchain.com has reorganized repeatedly; its `llms.txt` is
+both truncated *and* missing every LangChain/LangGraph page):
+
+- **sitemap.xml is the only trusted index**; pages fetched as `<url>.md` (Mintlify serves
+  clean markdown with the Python variant pre-resolved)
+- Scoping: URL-**prefix** allowlist for the hierarchical `/oss/` namespace + 127-slug
+  **exact** allowlist for the flat `/langsmith/` namespace
+- **Guardrails fail the build loudly**: any allowlisted page 404s, page count swings
+  ±10% from the recipe's `expected_pages`, or a 200 response serves HTML instead of
+  markdown (SPA shells never get embedded). The ±10% gate caught a wrong prefix on this
+  pack's very first build.
+- Refresh = re-run monthly. `lastmod` is deploy noise (241/409 pages once re-stamped in
+  the same second), so **content hashing** is the only re-embed trigger — the cache
+  makes an unchanged-page refresh cost zero API calls.
+</details>
+
+**The curation layer is the quality moat.** For the RAG pack, 44 technique cards
+(problem, mechanism, when-to-use, tradeoffs, dependencies verified against the notebook
+code) plus a synthesized ontology — 7 lifecycle stages, 25 failure modes each with
+user-phrasing variants, 292 typed relation edges — live as reviewable JSON in
+[`pipeline/packs/rag-techniques/curation/`](pipeline/packs/rag-techniques/curation).
+Processors attach documents and provenance; curation stays authoritative for meaning.
+
+---
+
+## 💬 Conversation memory
+
+Follow-ups are first-class ([design](research/context-management.md),
+[implementation](app/src-tauri/src/engine/advisor/context.rs)). Three context layers:
+
+1. **Pinned anchor** — the user's original problem statement, verbatim, never truncated
+   or paraphrased (paraphrase drift is how advisors forget constraints)
+2. **Sliding window** — the last ~3 raw exchanges
+3. **Running summary** — older turns folded in *asynchronously after* each turn commits,
+   never at the context cliff where the summarizer is already degraded
+
+Anti-repetition is structural: advisories are validated JSON, so "what the advisor
+already said" compresses losslessly into an advisor-state object (slugs + verdicts)
+instead of prose replay. Retrieved evidence is cached per conversation
+(`candidate_pool`), so drill-down follow-ups reuse it via free local fetches.
+
+Every turn writes a **trace** (route, standalone query, per-stage retrieval ids + scores,
+models, latency, validation outcomes) — a few KB per turn, enough to debug routing
+quality without storing chunk texts. History re-renders fully offline from stored
+advisory JSON.
+
+```sql
+-- app.db (WAL, %APPDATA%) — user data never touches pack files
+conversations · turns (advisory JSON + span citations) · turn_traces
+summaries (append-only fold log) · conversation_state (pinned problem,
+constraints, advisor_state, candidate_pool) · turns_fts · settings ·
+pack_registry · quota_ledger (per-month call counts → the usage meter)
+```
+
+---
+
+## 🔌 Cohere integration notes
+
+All API access lives in [`engine/cohere.rs`](app/src-tauri/src/engine/cohere.rs) — a
+typed REST client with per-endpoint token-bucket pacing tuned to trial-key ceilings
+(18 chat / 9 rerank / 80 embed per minute) and exponential backoff.
+
+| Role | Model | Why |
+|---|---|---|
+| Synthesis, planning | `command-a-03-2025` | flagship self-serve, 256k ctx, native citations |
+| Routing, grading, critic | `command-r7b-12-2024` | ~65× cheaper; `json_schema` support live-verified |
+| Rerank | `rerank-v4.0-pro` | one search unit covers the merged candidate set |
+| Embeddings | `embed-v4.0` @ 1024 dims | must match pack build exactly (`search_query` ↔ `search_document`) |
+
+All model ids are settings-overridable — newer Cohere models (Command A+ et al.) are
+sales-gated, so nothing hard-depends on them.
+
+Hard-won API facts (all live-verified, several the docs won't tell you):
+
+- **`response_format: json_schema` cannot combine with `tools` or `documents`.** The
+  client makes the combination unrepresentable; the dossier is cited prose whose
+  structure is assembled in Rust.
+- **`command-a-03-2025` rejects explicit `citation_options` modes** — omit the field;
+  the default already returns span citations.
+- **Citation offsets are Unicode code points; JS strings are UTF-16.** Rather than
+  converting, the frontend verifies each span against `citation.text` and relocates to
+  the nearest occurrence — wrong-unit drift can never mis-highlight a claim:
+
+```tsx
+// CitedMarkdown.tsx — never trust raw offsets
+if (md.slice(start, start + c.text.length) !== c.text) {
+  const before = md.lastIndexOf(c.text, start);
+  const after  = md.indexOf(c.text, Math.max(0, start - c.text.length));
+  const candidates = [before, after].filter((p) => p >= 0);
+  if (!candidates.length) return null;            // unlocatable → skip mark
+  start = candidates.reduce((a, b) =>
+    Math.abs(a - c.start) <= Math.abs(b - c.start) ? a : b);
+}
+```
+
+- **Monthly-cap 429s are distinguishable from per-minute 429s** (message text) and map
+  to a typed `QuotaExhausted` the UI explains properly.
+
+---
+
+## 🎨 Design system & accessibility
+
+The same bar, on purpose: the most polished products are also the most accessible.
+
+- **3-layer OKLCH tokens** ([tokens.css](app/src/design/tokens.css)): primitives →
+  semantic (`--bg-*`, `--fg-*`, `--accent*`) → component. Tailwind v4 utilities map
+  through `@theme inline`, so themes, density, motion, and the user's accent are pure
+  CSS-variable swaps — zero rebuilds. Four themes (Porcelain, Graphite, Midnight,
+  Contrast) + system tracking.
+- **WCAG AA is enforced by CI, not hoped for**: a Vitest matrix
+  ([contrast.test.ts](app/src/design/contrast.test.ts)) parses `tokens.css` *itself* and
+  hard-fails below 4.5:1 (text) / 3:1 (affordances) — and sweeps the **entire accent hue
+  wheel** at every allowed chroma, so no user accent choice can break contrast. The same
+  chroma clamp ships in the settings code. axe (WCAG 2.1 A+AA) runs clean on every theme.
+- **Rendering**: Shiki v4 with the **JavaScript regex engine** (the default WASM engine
+  needs `unsafe-eval`, which the strict Tauri CSP forbids), dual-theme CSS variables,
+  lazy language loading. Notebook viewer renders nbformat cells with DOMPurify-sanitized
+  HTML outputs, ANSI tracebacks, and cited-cell focus rings.
+- **Motion**: Motion v12 + tokenized durations with a global intensity setting;
+  `prefers-reduced-motion` always wins. First paint is pre-themed via `index.html`
+  attributes — no flash, no transition-from-unstyled.
+- **Sound**: ~80 lines of raw Web Audio synthesizing four soft cues — no assets, no
+  licenses, off by default, per-event toggles.
+- Full keyboard nav, `:focus-visible` rings, `aria-live` result announcements, meaning
+  never conveyed by color alone.
+
+---
+
+## 🧪 Testing & verification
+
+| Layer | What runs |
+|---|---|
+| Pack build | 20+ validator checks per pack: SQLite integrity, FK graph, vector byte-lengths, FTS round-trip sampling, index sha256 + self-query sanity, recall@10 ≥ 0.98 gate, license fields |
+| Engine (offline) | `cargo test` against the real built packs: load < 1s, BM25 + dense + fusion behavior, self-retrieval exactness, graph expansion, multi-pack merge, degraded-mode advisories, smalltalk never spends API calls |
+| Engine (live) | `cargo test -- --ignored`: full S1→S9 Balanced advisory + follow-up on the trial key (~10 calls), asserting citations, recommendations, and export integrity |
+| UI | `vitest` (60 contrast assertions), `tsc --noEmit`, axe audits |
+| Adversarial | A 27-agent review swept engine/pipeline/UI/security dimensions; every finding was independently verified against the code before fixing — 19 confirmed, 19 fixed |
+
+---
+
+## 🛠 Development
+
+```bash
+# 1. Packs (offline; needs COHERE_API_KEY_PRODUCTION in repo-root .env)
 cd pipeline
 python -m venv .venv && .venv/Scripts/pip install -r requirements.txt
 .venv/Scripts/python -m compendium_pack build packs/rag-techniques --source <RAG_Techniques clone>
 .venv/Scripts/python -m compendium_pack build packs/framework-docs --source .cache/webdocs
 
-# app (dev)
-cd app && npm install
+# 2. App
+cd ../app && npm install
 COMPENDIUM_PACKS_DIR=../packs-out npm run tauri dev
 
-# tests
-cd app/src-tauri && cargo test          # engine (needs built packs)
-cd app && npx vitest run                # UI + WCAG contrast matrix
-npm run tauri build                     # NSIS installer (bundles packs-out/)
+# 3. Tests
+cd src-tauri && cargo test              # engine (needs built packs)
+cd .. && npx vitest run                 # UI + contrast matrix
+npm run tauri build                     # NSIS installer → bundles packs-out/
 ```
 
-## Attribution & license posture
+Extending Compendium — a new pack, a new source type (PDF papers?), a new advisor
+stage — is a normal feature PR, not a plugin API. The seams, invariants, and worked
+examples are in **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)**; the architecture
+rationale (with the research it rests on) is in **[docs/PLAN.md](docs/PLAN.md)**.
 
-The RAG Techniques pack is derived (with modifications) from
+---
+
+## 📜 License & attribution
+
+Compendium is **free and non-commercial**, and must remain so: the RAG Techniques pack is
+derived (with modifications — analysis, summarization, restructuring) from
 [NirDiamant/RAG_Techniques](https://github.com/NirDiamant/RAG_Techniques) by
-**Nir Diamant**, used under its custom license for **non-commercial** purposes with
-attribution; Compendium is therefore free and non-commercial, and renders this
-attribution in-app and in exported dossiers. Framework documentation ©
-[LangChain](https://docs.langchain.com), MIT License. Compendium is an independent
-project — no endorsement by or affiliation with either source is implied.
+**Nir Diamant**, used under its custom license which permits non-commercial
+redistribution with attribution. That attribution is *structural* here: packs without
+license + attribution fields fail the build and refuse to load, and the notice renders
+in-app and inside every exported dossier.
+
+Framework documentation © [LangChain](https://docs.langchain.com), MIT License
+([source repo](https://github.com/langchain-ai/docs)). Fonts: Inter Variable &
+JetBrains Mono Variable (OFL 1.1). Compendium is an independent project — no endorsement
+by or affiliation with any upstream source is implied.
+
+<div align="center">
+<sub>Built with Tauri 2 · Rust · React 19 · usearch · SQLite · Cohere</sub>
+</div>
