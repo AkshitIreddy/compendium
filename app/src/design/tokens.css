@@ -1,0 +1,189 @@
+/* Compendium design tokens — 3 layers:
+   1. primitives (raw OKLCH ramps)            --gray-*, --accent-*
+   2. semantic   (what surfaces/text mean)    --bg-*, --fg-*, --border-*, --accent
+   3. component  (kept in component files, pointing at layer 2)
+
+   Themes are data-theme attributes on <html>; density/motion likewise.
+   All utilities map through @theme inline in global.css, so every theme,
+   accent, and density change is a pure CSS-variable swap — no rebuilds. */
+
+:root {
+  /* ---------- typography scale */
+  --font-ui: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, "Cascadia Code", monospace;
+  --text-xs: calc(0.75rem * var(--font-scale, 1));
+  --text-sm: calc(0.8125rem * var(--font-scale, 1));
+  --text-base: calc(0.875rem * var(--font-scale, 1));
+  --text-md: calc(1rem * var(--font-scale, 1));
+  --text-lg: calc(1.125rem * var(--font-scale, 1));
+  --text-xl: calc(1.375rem * var(--font-scale, 1));
+  --leading: var(--leading-base, 1.55);
+
+  /* ---------- spacing rhythm (density-scaled) */
+  --sp-1: calc(0.25rem * var(--density, 1));
+  --sp-2: calc(0.5rem * var(--density, 1));
+  --sp-3: calc(0.75rem * var(--density, 1));
+  --sp-4: calc(1rem * var(--density, 1));
+  --sp-5: calc(1.5rem * var(--density, 1));
+  --sp-6: calc(2rem * var(--density, 1));
+
+  /* ---------- radii & elevation */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-raised: 0 1px 2px oklch(0 0 0 / 0.08), 0 4px 12px oklch(0 0 0 / 0.06);
+  --shadow-overlay: 0 4px 12px oklch(0 0 0 / 0.18), 0 16px 40px oklch(0 0 0 / 0.22);
+
+  /* ---------- motion (scaled globally; 0 disables) */
+  --motion-scale: 1;
+  --dur-fast: calc(120ms * var(--motion-scale));
+  --dur-med: calc(220ms * var(--motion-scale));
+  --dur-slow: calc(360ms * var(--motion-scale));
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.3, 0.64, 1);
+
+  /* ---------- accent primitives (default: iris) — overridden by the accent
+     engine in settings; every ramp step keeps AA against its usage surface */
+  --accent-h: 275;
+  --accent-c: 0.13;
+}
+
+/* =========================================================== themes
+   Each theme defines the full semantic layer. Contrast pairs are
+   CI-verified (fg-primary/bg-app ≥ 7:1, fg-secondary ≥ 4.5:1,
+   fg-muted only for non-essential text, accent-fg/accent ≥ 4.5:1). */
+
+/* Porcelain — default light */
+:root[data-theme="porcelain"] {
+  color-scheme: light;
+  --bg-app: oklch(0.975 0.003 260);
+  --bg-surface: oklch(0.99 0.002 260);
+  --bg-raised: oklch(1 0 0);
+  --bg-inset: oklch(0.955 0.004 260);
+  --bg-overlay: oklch(1 0 0);
+  --fg-primary: oklch(0.24 0.015 265);
+  --fg-secondary: oklch(0.42 0.015 265);
+  --fg-muted: oklch(0.55 0.012 265);
+  --border-subtle: oklch(0.905 0.005 260);
+  --border-strong: oklch(0.83 0.008 260);
+  --border-input: oklch(0.58 0.01 260);
+  --accent: oklch(0.51 var(--accent-c) var(--accent-h));
+  --accent-fg: oklch(0.99 0.002 260);
+  --accent-subtle: oklch(0.93 0.045 var(--accent-h));
+  --accent-subtle-fg: oklch(0.35 0.11 var(--accent-h));
+  --success: oklch(0.52 0.13 155);
+  --warning: oklch(0.51 0.125 70);
+  --danger: oklch(0.53 0.19 25);
+  --info: oklch(0.52 0.12 240);
+  --code-bg: oklch(0.955 0.004 260);
+  --selection: oklch(0.88 0.06 var(--accent-h));
+}
+
+/* Graphite — default dark */
+:root[data-theme="graphite"] {
+  color-scheme: dark;
+  --bg-app: oklch(0.205 0.008 265);
+  --bg-surface: oklch(0.235 0.009 265);
+  --bg-raised: oklch(0.27 0.01 265);
+  --bg-inset: oklch(0.175 0.008 265);
+  --bg-overlay: oklch(0.255 0.01 265);
+  --fg-primary: oklch(0.93 0.005 260);
+  --fg-secondary: oklch(0.76 0.008 260);
+  --fg-muted: oklch(0.62 0.008 260);
+  --border-subtle: oklch(0.31 0.01 265);
+  --border-strong: oklch(0.40 0.012 265);
+  --border-input: oklch(0.63 0.012 265);
+  --accent: oklch(0.72 var(--accent-c) var(--accent-h));
+  --accent-fg: oklch(0.17 0.02 var(--accent-h));
+  --accent-subtle: oklch(0.32 0.06 var(--accent-h));
+  --accent-subtle-fg: oklch(0.87 0.07 var(--accent-h));
+  --success: oklch(0.74 0.14 155);
+  --warning: oklch(0.78 0.13 80);
+  --danger: oklch(0.72 0.16 25);
+  --info: oklch(0.74 0.11 240);
+  --code-bg: oklch(0.175 0.008 265);
+  --selection: oklch(0.42 0.08 var(--accent-h));
+}
+
+/* Midnight — deep blue-black, high chroma accents */
+:root[data-theme="midnight"] {
+  color-scheme: dark;
+  --bg-app: oklch(0.16 0.02 275);
+  --bg-surface: oklch(0.19 0.022 275);
+  --bg-raised: oklch(0.225 0.025 275);
+  --bg-inset: oklch(0.135 0.018 275);
+  --bg-overlay: oklch(0.21 0.024 275);
+  --fg-primary: oklch(0.93 0.008 270);
+  --fg-secondary: oklch(0.75 0.015 270);
+  --fg-muted: oklch(0.60 0.02 270);
+  --border-subtle: oklch(0.27 0.025 275);
+  --border-strong: oklch(0.36 0.03 275);
+  --border-input: oklch(0.62 0.03 275);
+  --accent: oklch(0.75 var(--accent-c) var(--accent-h));
+  --accent-fg: oklch(0.15 0.02 var(--accent-h));
+  --accent-subtle: oklch(0.30 0.07 var(--accent-h));
+  --accent-subtle-fg: oklch(0.88 0.08 var(--accent-h));
+  --success: oklch(0.75 0.14 155);
+  --warning: oklch(0.79 0.13 80);
+  --danger: oklch(0.73 0.16 25);
+  --info: oklch(0.75 0.11 240);
+  --code-bg: oklch(0.135 0.018 275);
+  --selection: oklch(0.40 0.09 var(--accent-h));
+}
+
+/* Contrast — WCAG AAA-leaning high contrast (also used as forced-colors base) */
+:root[data-theme="contrast"] {
+  color-scheme: dark;
+  --bg-app: oklch(0.1 0 0);
+  --bg-surface: oklch(0.13 0 0);
+  --bg-raised: oklch(0.17 0 0);
+  --bg-inset: oklch(0.06 0 0);
+  --bg-overlay: oklch(0.15 0 0);
+  --fg-primary: oklch(0.99 0 0);
+  --fg-secondary: oklch(0.92 0 0);
+  --fg-muted: oklch(0.83 0 0);
+  --border-subtle: oklch(0.45 0 0);
+  --border-strong: oklch(0.65 0 0);
+  --border-input: oklch(0.78 0 0);
+  --accent: oklch(0.85 0.15 var(--accent-h));
+  --accent-fg: oklch(0.1 0 0);
+  --accent-subtle: oklch(0.28 0.06 var(--accent-h));
+  --accent-subtle-fg: oklch(0.95 0.05 var(--accent-h));
+  --success: oklch(0.85 0.15 155);
+  --warning: oklch(0.88 0.14 85);
+  --danger: oklch(0.80 0.17 25);
+  --info: oklch(0.85 0.12 240);
+  --code-bg: oklch(0.06 0 0);
+  --selection: oklch(0.45 0.1 var(--accent-h));
+}
+
+/* =========================================================== density */
+:root[data-density="compact"] {
+  --density: 0.8;
+  --leading-base: 1.42;
+}
+:root[data-density="comfortable"] {
+  --density: 1.15;
+  --leading-base: 1.65;
+}
+
+/* =========================================================== motion */
+:root[data-motion="off"] {
+  --motion-scale: 0;
+}
+:root[data-motion="reduced"] {
+  --motion-scale: 0.5;
+}
+@media (prefers-reduced-motion: reduce) {
+  :root:not([data-motion="full"]) {
+    --motion-scale: 0;
+  }
+}
+
+/* =========================================================== a11y */
+@media (forced-colors: active) {
+  :root {
+    --shadow-raised: none;
+    --shadow-overlay: none;
+  }
+}
