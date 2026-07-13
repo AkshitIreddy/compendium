@@ -1,0 +1,82 @@
+{
+  "slug": "crag",
+  "title": "Corrective RAG (CRAG)",
+  "one_liner": "Scores each retrieved chunk for relevance with an LLM evaluator and, when local retrieval is weak, corrects the pipeline by rewriting the query and falling back to live web search before generating.",
+  "stage": "orchestration",
+  "problem_solved": "Standard RAG blindly trusts whatever the retriever returns: when the top-k chunks are irrelevant, out-of-domain, or outdated, the LLM still generates an answer from them, producing ungrounded or stale responses with no signal that retrieval failed. CRAG inserts an explicit retrieval-quality gate and a corrective fallback (web search) so the system detects bad retrieval and sources better knowledge instead of hallucinating.",
+  "failure_modes": [
+    "The retriever returns irrelevant chunks and the model confidently answers from them anyway (hallucination on retrieval miss)",
+    "User questions fall outside the scope of my document collection and the system has no fallback",
+    "My knowledge base is outdated, so answers about current events, recent facts, or changing data are stale",
+    "There is no way to detect or measure when retrieval has failed for a given query",
+    "Marginally relevant chunks pollute the context window and drown out the one useful passage",
+    "Answers cite nothing, so users cannot verify where the information came from"
+  ],
+  "when_to_use": [
+    "Your corpus is narrow or incomplete and users regularly ask questions it cannot answer (support bots, research assistants)",
+    "Freshness matters: questions involve current events, prices, versions, or anything that goes stale in a static index",
+    "You need the system to fail loudly on bad retrieval instead of silently hallucinating, and can route to an external source",
+    "Your deployment permits outbound web search (DuckDuckGo or similar) at query time",
+    "You can tolerate several extra LLM calls of latency and cost per query in exchange for answer reliability",
+    "You want per-document relevance scores as an observability signal for debugging retrieval quality"
+  ],
+  "tradeoffs": [
+    "Adds one evaluator LLM call per retrieved document per query (k=3 by default), plus optional query-rewrite and knowledge-refinement calls: roughly 2-3x the LLM calls and latency of plain RAG",
+    "Depends on a live web-search service; unusable in air-gapped or privacy-sensitive deployments, and web results are untrusted content that can be low quality or adversarial",
+    "The 0.7/0.3 relevance thresholds are hard-coded and arbitrary; LLM relevance scores are noisy and uncalibrated, so routing decisions need tuning per domain",
+    "In the high-confidence path only the single best-scoring document is used, discarding other relevant retrieved chunks",
+    "This is a simplified implementation of the CRAG paper: it uses a general-purpose LLM as evaluator (not a trained lightweight one) and coarse bullet-point refinement rather than strip-level decompose-recompose",
+    "Search-result parsing (json.loads on the DuckDuckGo string output) is brittle and silently returns empty sources on failure",
+    "Do not use when the corpus reliably covers the question domain and latency/cost budgets are tight; a reranker or simple relevance filter is cheaper"
+  ],
+  "how_it_works": "A PDF is chunked and embedded into a FAISS vector store (encode_pdf helper). At query time, crag_process retrieves the top-3 chunks via similarity_search, then an LLM retrieval evaluator (ChatOpenAI gpt-4o-mini with with_structured_output on a Pydantic model) scores each chunk's relevance to the query on a 0-1 scale. Routing on the max score: >0.7 ('Correct') uses the best document as-is; <0.3 ('Incorrect') discards local results, rewrites the query with an LLM for web search, runs DuckDuckGoSearchResults, and distills the results into bullet-point key facts via a knowledge_refinement chain; 0.3-0.7 ('Ambiguous') refines the best local document AND performs the web search, concatenating both knowledge sets. Finally, a response-generation prompt answers the query from the assembled knowledge and appends source titles/links for transparency. Though categorized here as orchestration (conditional routing between knowledge sources), it embeds post-retrieval evaluation/refinement and query-transformation (web-search query rewriting) as sub-steps.",
+  "key_dependencies": [
+    "langchain (PromptTemplate, tools)",
+    "langchain-openai (ChatOpenAI, gpt-4o-mini)",
+    "FAISS vector store (via repo helper_functions.encode_pdf)",
+    "DuckDuckGoSearchResults (langchain.tools, duckduckgo-search)",
+    "langchain_core.pydantic_v1 (BaseModel/Field for structured outputs)",
+    "python-dotenv (OPENAI_API_KEY loading)",
+    "OpenAI API"
+  ],
+  "key_code_signals": [
+    "llm.with_structured_output(RetrievalEvaluatorInput) — LLM returns a 0-1 relevance_score per (query, document) pair",
+    "if max_score > 0.7 / elif max_score < 0.3 / else — three-way Correct/Incorrect/Ambiguous routing on the best relevance score",
+    "search = DuckDuckGoSearchResults() and perform_web_search() — corrective fallback to live web search",
+    "rewrite_query() chain — LLM rewrites the user query to be web-search friendly before searching",
+    "knowledge_refinement() chain — distills raw documents/search results into bullet-point key facts",
+    "faiss_index.similarity_search(query, k=3) inside retrieve_documents() — standard vector retrieval as the first attempt",
+    "generate_response() prompt that injects query, knowledge, and formatted sources for attributed answers",
+    "crag_process(query, faiss_index) — single orchestrator function tying retrieve, evaluate, correct, generate together"
+  ],
+  "related_techniques": [
+    "self-rag: alternative — sibling self-reflective architecture that decides whether to retrieve and critiques generation support, versus CRAG's evaluate-then-correct routing",
+    "reliable-rag: alternative — also LLM-checks retrieved-document relevance before answering, but without the web-search corrective fallback",
+    "simple-rag: prerequisite — CRAG wraps a baseline FAISS similarity-search pipeline with evaluation and correction",
+    "reranking: alternative — reranking reorders retrieved chunks by relevance; CRAG gates and routes on relevance instead",
+    "query-transformations: composes-with — CRAG's web-search query rewriter is a query-transformation step applied to the fallback path",
+    "contextual-compression: related — CRAG's knowledge_refinement (bullet-point distillation) plays the same role as compressing retrieved content",
+    "agentic-rag: related — both dynamically choose among knowledge sources; CRAG is a fixed rule-based router rather than a free agent"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "corrective RAG",
+    "CRAG",
+    "retrieval evaluator",
+    "relevance score threshold",
+    "web search fallback",
+    "retrieval failure detection",
+    "hallucination on irrelevant retrieval",
+    "out-of-domain questions",
+    "stale knowledge base",
+    "query rewriting for web search",
+    "knowledge refinement",
+    "DuckDuckGo search RAG",
+    "self-correcting RAG",
+    "adaptive retrieval routing",
+    "source attribution"
+  ],
+  "summary": "Corrective RAG (CRAG) wraps a standard FAISS vector-retrieval pipeline in a quality-control loop that detects and repairs retrieval failures. After retrieving top-k chunks, an LLM evaluator (gpt-4o-mini with structured output) assigns each a 0-1 relevance score. The max score routes the pipeline: high (>0.7) uses the best local document directly; low (<0.3) treats local retrieval as failed, rewrites the query for the web, runs a DuckDuckGo search, and distills results into key bullet points; ambiguous (0.3-0.7) refines the best local chunk and merges it with refined web results. A final generation prompt answers from the assembled knowledge and appends source titles and links. CRAG fixes the core failure where RAG hallucinates from irrelevant or outdated chunks and where out-of-scope questions get no fallback. Costs: roughly 2-3x more LLM calls per query, a live web-search dependency unsuitable for air-gapped deployments, hard-coded thresholds needing per-domain tuning, and noisy LLM relevance scores. Prefer it when corpus coverage is incomplete or freshness matters; skip it for well-covered domains with tight latency budgets.",
+  "notes_for_chunking": "Structure: 29 cells, roughly half markdown. Cell 0 is a book-promo ad (strip). Cell 1 is a long, fully self-contained overview markdown (Overview/Motivation/Key Components/Method Details/Benefits/Conclusion with the exact 0.7/0.3 threshold logic) — ideal as a standalone concept chunk. Cell 2 is an image reference to ../images/crag.svg (strip or keep as pointer). Cells 3-8 are setup junk: pip install, git clone + sys.path hack, wildcard imports (from helper_functions import *, which implicitly provides FAISS, List, Tuple, json, encode_pdf), dotenv/API-key boilerplate, and a duplicated wget data download — strip except the real imports, which chunkers should attach to code chunks since later cells reference names never explicitly imported. Core logic is concentrated in three well-documented code cells, each preceded by a short '###' markdown header: LLM chains with Pydantic schemas (evaluator/refinement/rewriter), CRAG sub-functions with docstrings, and the crag_process orchestrator — each is self-contained enough to chunk cell-per-chunk with its header. Two example-query cells (high-relevance and low-relevance demos) show usage; no stored outputs or base64 blobs. Final cell is a tracking-pixel markdown (strip).",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/crag.json"
+}

@@ -1,0 +1,80 @@
+{
+  "slug": "multi_model_rag_with_captioning",
+  "title": "Multi-modal RAG with Captioning (Vision-LLM Image Summaries Indexed as Text)",
+  "one_liner": "Extracts images from PDFs, captions them with a vision LLM (Gemini 1.5 Flash) into retrieval-optimized text summaries, and indexes those captions alongside page text in one Chroma vector store so figures and tables become searchable with ordinary text embeddings.",
+  "stage": "indexing",
+  "problem_solved": "Text-only RAG pipelines silently drop figures, charts, diagrams, and tables that are embedded as images in PDFs, so any question whose answer lives in a visual element retrieves nothing useful. This technique converts visual content into text at index time (image -> caption/summary) so it becomes retrievable and answerable through a standard text-embedding pipeline, without adopting a multimodal embedding model.",
+  "failure_modes": [
+    "My documents contain figures, charts, or diagrams and my RAG system can't answer questions about them",
+    "Answers that live only in a table or figure of a PDF are never retrieved",
+    "PDF text extraction ignores images, so visual content is invisible to the retriever",
+    "Questions about specific values shown in charts or result tables (e.g. 'what is the BLEU score of the base model?') come back unanswered or hallucinated",
+    "I need one unified index over both text and visual content but my embedding model is text-only"
+  ],
+  "when_to_use": [
+    "Your corpus is PDFs (papers, financial reports, manuals, slide exports) where key facts appear in figures or tables rendered as embedded images",
+    "You want to keep a standard text-embedding vector store and query-time latency of plain RAG, paying the multimodal cost once at index time",
+    "You have access to a vision-capable LLM for offline captioning (Gemini, GPT-4o, Claude) and an embedding service",
+    "Users ask factual questions whose answers appear in experiment tables, benchmark charts, or labeled diagrams",
+    "Index build is infrequent and image counts are moderate, so per-image captioning cost is acceptable"
+  ],
+  "tradeoffs": [
+    "One vision-LLM call per extracted image at index time: build cost and time scale linearly with image count",
+    "Captioning is lossy compression: any visual detail the summary does not verbalize is unrecoverable at query time; dense tables or fine-grained charts may lose exact values",
+    "The notebook stores only the caption text, not a pointer back to the raw image, so generation answers from the caption rather than re-inspecting the original figure",
+    "Depends on three external services (Google Gemini for captioning, Cohere for embeddings and generation, Chroma locally): multiple API keys and vendor coupling",
+    "PyMuPDF page.get_images() only finds embedded raster images; vector-drawn charts and tables laid out as text get no special handling",
+    "Retrieval in the notebook is naive similarity with k=1 and no reranking or grounding checks, which is brittle; the generation prompt even says 'answer based upon your knowledge', weakening faithfulness",
+    "Do not use if your documents are text-only (plain RAG is cheaper) or if visual fidelity is critical, where ColPali-style page-image embeddings that retrieve the actual page image are a better fit"
+  ],
+  "how_it_works": "Index time (dominant stage): PyMuPDF (fitz) opens the PDF and, per page, captures the raw text (stored as a Document with page-number metadata) and extracts every embedded raster image via page.get_images(full=True) + pdf_file.extract_image(xref), saving each with PIL. Each saved image is sent to Gemini 1.5 Flash with a prompt instructing it to produce a concise summary of the table/image/text 'well optimized for retrieval'; the returned caption becomes its own text Document. Both page-text Documents and caption Documents are split with RecursiveCharacterTextSplitter.from_tiktoken_encoder (chunk_size=400, overlap=50), embedded with Cohere embed-english-v3.0, and loaded into a single Chroma collection, so image-derived text competes in the same semantic space as body text. Query time: a plain similarity retriever (k=1 in the notebook) fetches the best chunk, which may be an image caption, and a LangChain chain (ChatPromptTemplate | ChatCohere command-r-plus | StrOutputParser) generates a short answer from it. Retrieval and generation stages are otherwise vanilla; all the technique's leverage is in the captioning-based indexing.",
+  "key_dependencies": [
+    "pymupdf (fitz) for PDF text and image extraction",
+    "Pillow (PIL) for image loading/saving",
+    "google-generativeai (Gemini 1.5 Flash) for image captioning/summarization",
+    "langchain / langchain-core / langchain-community for orchestration, prompts, Document, text splitter",
+    "langchain_cohere: CohereEmbeddings (embed-english-v3.0) and ChatCohere (command-r-plus)",
+    "Chroma vector store (langchain_community.vectorstores.Chroma)",
+    "python-dotenv for API key loading",
+    "tiktoken (via RecursiveCharacterTextSplitter.from_tiktoken_encoder)"
+  ],
+  "key_code_signals": [
+    "fitz.open(pdf) with page.get_text() and page.get_images(full=True) / pdf_file.extract_image(xref) — dual text+image extraction loop",
+    "genai.GenerativeModel(model_name=\"gemini-1.5-flash\") — vision model configured for captioning",
+    "model.generate_content([image, 'You are an assistant tasked with summarizing tables, images and text for retrieval...']) — retrieval-optimized caption prompt per image",
+    "CohereEmbeddings(model=\"embed-english-v3.0\") — text embeddings applied to both page text and captions",
+    "RecursiveCharacterTextSplitter.from_tiktoken_encoder(chunk_size=400, chunk_overlap=50)",
+    "Chroma.from_documents(documents=doc_splits + img_splits, collection_name=\"multi_model_rag\", ...) — single mixed text+caption index",
+    "vectorstore.as_retriever(search_type=\"similarity\", search_kwargs={'k': 1}) — naive top-1 retrieval",
+    "prompt | ChatCohere(model=\"command-r-plus\", temperature=0) | StrOutputParser() — plain LCEL generation chain"
+  ],
+  "related_techniques": [
+    "multi_model_rag_with_colpali: alternative — embeds PDF page images directly with a vision retrieval model instead of converting images to lossy text captions",
+    "simple_rag: refines — extends the baseline text-only RAG pipeline to documents containing visual content",
+    "document_augmentation: analogous — both generate synthetic text at index time to make hard-to-retrieve content retrievable",
+    "reranking: composes — the naive k=1 similarity retrieval over a mixed text+caption index would benefit from reranking",
+    "context_enrichment_window_around_chunk: composes — small 400-token chunks could be expanded with neighboring context after retrieval",
+    "contextual_chunk_headers: composes — captions and page chunks could carry document/section headers to disambiguate mixed-source chunks"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "multimodal RAG",
+    "multi-modal RAG",
+    "image captioning",
+    "image summarization",
+    "PDF figures",
+    "tables in PDFs",
+    "chart question answering",
+    "figure retrieval",
+    "PyMuPDF image extraction",
+    "Gemini vision",
+    "vision LLM captions",
+    "Cohere embeddings",
+    "Chroma vectorstore",
+    "RAG over PDFs with images",
+    "index images as text"
+  ],
+  "summary": "Technique for making figures, charts, and tables inside PDFs retrievable in a standard text-based RAG pipeline. At index time, PyMuPDF extracts each page's text and every embedded raster image; each image is sent to Gemini 1.5 Flash with a prompt requesting a concise summary 'optimized for retrieval'. These captions are treated as ordinary text documents: both page text and captions are split into 400-token chunks (50 overlap), embedded with Cohere embed-english-v3.0, and stored together in one Chroma collection. Query time is unchanged plain RAG: similarity retrieval (k=1 in the notebook) followed by answer generation with Cohere command-r-plus. Solves the failure where answers living only in a figure or results table are never retrieved by text-only pipelines, without requiring multimodal embeddings. Costs: one vision-LLM call per image at build time, and lossy captions — details not verbalized are unrecoverable, and the raw image is not linked back for generation. Prefer ColPali-style page-image embedding when visual fidelity matters; skip entirely for text-only corpora.",
+  "notes_for_chunking": "Well-structured, short notebook (23 cells) with clean one-line markdown headers mapping 1:1 to pipeline stages: 'Data Extraction', 'Image Captioning', 'Vectostore' (note the typo — normalize to 'Vectorstore'), 'Query', 'Output'. Cells 1-2 form a self-contained Overview/Key Components/Motivation/Method/Benefits block that is ideal card-summary material. Code cells are short (5-25 lines) and each depends on state from prior cells (text_data/img_data flow into the vectorstore cell), so stage-level chunks should include their header plus code cell(s). Junk to strip: cell 0 (promotional book advertisement), the pip-install cell, the wget download cell and its verbose transfer log output, load_dotenv boilerplate, an SVG diagram reference, and the final view-tracker image cell. Outputs are tiny except the wget log; no base64 blobs. Markdown-to-code ratio is roughly 50/50; markdown is descriptive and honest to the code.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/multi_model_rag_with_captioning.json"
+}

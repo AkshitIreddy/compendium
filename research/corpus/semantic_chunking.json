@@ -1,0 +1,80 @@
+{
+  "slug": "semantic_chunking",
+  "title": "Semantic Chunking",
+  "one_liner": "Split documents at embedding-detected topic boundaries instead of fixed character counts, so each chunk is a semantically coherent unit.",
+  "stage": "chunking",
+  "problem_solved": "Fixed-size (character/token) splitters cut documents at arbitrary points, slicing sentences and ideas mid-thought. The resulting chunks mix unrelated topics or omit the sentence that completes a fact, which muddies their embeddings and returns incoherent or partially relevant passages at retrieval time.",
+  "failure_modes": [
+    "My retrieved chunks cut off mid-sentence or mid-idea, so the answer's supporting text is split across two chunks",
+    "Fixed-size chunks blend two unrelated topics, giving muddy embeddings and retrieval that returns only partially relevant text",
+    "No single chunk size/overlap setting works across my heterogeneous documents — every value fragments something",
+    "Retrieved passages read as incoherent fragments and the LLM answers from incomplete context",
+    "Long flowing prose (reports, papers, legal text) has no headings to split on, so structural splitters fall back to arbitrary cuts"
+  ],
+  "when_to_use": [
+    "Your corpus is long, discursive prose (scientific papers, legal documents, comprehensive reports) where facts depend on the surrounding sentences",
+    "Documents lack reliable structural markers (headings, sections, markup) that a structure-aware splitter could use",
+    "You have evidence that fixed-size splitting is fragmenting facts across chunk boundaries and hurting retrieval relevance",
+    "You want better chunk boundaries without any LLM calls — only an extra embedding pass at index time",
+    "Chunk coherence matters more to you than predictable chunk sizes"
+  ],
+  "tradeoffs": [
+    "Extra embedding API calls for every sentence at index time — higher index build cost and latency, scaling with corpus size",
+    "Chunk sizes become variable and unpredictable: some chunks can exceed your context budget, others can be a single sentence; often needs a max-size fallback splitter",
+    "The breakpoint threshold (percentile / standard_deviation / interquartile and its amount) must be tuned per corpus; a bad threshold over- or under-splits",
+    "Ignores explicit document structure — if your docs have good headings or markup, a structure-aware splitter (or contextual chunk headers) may beat it more cheaply",
+    "Lives in langchain_experimental, so the API is less stable than core splitters",
+    "Does nothing for retrieval failures caused by query-vocabulary mismatch, multi-hop questions, or tabular/visual content — it only fixes boundary placement"
+  ],
+  "how_it_works": "The notebook reads a PDF into one raw string via a repo helper (read_pdf_to_string, built on PyMuPDF/fitz), then instantiates LangChain's SemanticChunker from langchain_experimental with OpenAIEmbeddings, breakpoint_threshold_type='percentile' and breakpoint_threshold_amount=90. The splitter embeds consecutive sentences, computes the semantic distance between each adjacent pair, and places chunk boundaries wherever the distance exceeds the 90th percentile of all distances (standard_deviation and interquartile are alternative threshold strategies). text_splitter.create_documents([content]) produces variable-length, topically coherent Document chunks. These are then embedded again with OpenAIEmbeddings and indexed into a FAISS vector store (indexing stage), and a retriever with k=2 serves a test query ('What is the main cause of climate change?') through the repo's retrieve_context_per_question helper. The technique operates purely at chunking/indexing time — query-time behavior is a plain similarity-search retriever, so it composes freely with any retrieval or post-retrieval technique.",
+  "key_dependencies": [
+    "langchain-experimental (SemanticChunker)",
+    "langchain-openai (OpenAIEmbeddings)",
+    "FAISS via langchain_community vectorstore",
+    "PyMuPDF (fitz) via repo helper_functions for PDF-to-string extraction",
+    "python-dotenv (API key loading)",
+    "OpenAI API (embeddings service)"
+  ],
+  "key_code_signals": [
+    "from langchain_experimental.text_splitter import SemanticChunker",
+    "from langchain_openai.embeddings import OpenAIEmbeddings",
+    "SemanticChunker(OpenAIEmbeddings(), breakpoint_threshold_type='percentile', breakpoint_threshold_amount=90)",
+    "text_splitter.create_documents([content])",
+    "content = read_pdf_to_string(path)",
+    "FAISS.from_documents(docs, embeddings)",
+    "vectorstore.as_retriever(search_kwargs={'k': 2})"
+  ],
+  "related_techniques": [
+    "simple_rag: refines (drop-in replacement for the fixed-size splitter in a baseline RAG pipeline)",
+    "choose_chunk_size: alternative (tunes fixed-size splitting instead of replacing it)",
+    "proposition_chunking: alternative (LLM-generated atomic propositions vs embedding-boundary chunks; more precise but far more expensive)",
+    "contextual_chunk_headers: composes (prepend document/section context to whatever chunks semantic chunking produces)",
+    "context_enrichment_window_around_chunk: alternative (fixes boundary fragmentation at retrieval time by expanding to neighboring sentences instead of at chunking time)",
+    "relevant_segment_extraction: composes (reconstructs longer multi-chunk segments at query time from coherent base chunks)",
+    "contextual_compression: composes (post-retrieval trimming pairs well with variable-size semantic chunks that can run large)"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "semantic chunking",
+    "chunking strategy",
+    "text splitting",
+    "chunk boundaries",
+    "embedding-based splitting",
+    "SemanticChunker",
+    "breakpoint threshold",
+    "percentile split",
+    "topic boundary detection",
+    "chunks cut mid-sentence",
+    "fixed-size chunking problems",
+    "chunk size tuning",
+    "coherent chunks",
+    "document segmentation",
+    "langchain experimental",
+    "FAISS",
+    "OpenAI embeddings",
+    "PDF chunking"
+  ],
+  "summary": "Semantic chunking replaces fixed-size text splitting with boundary detection based on embedding similarity between adjacent sentences. The notebook reads a PDF into a raw string, then applies LangChain's SemanticChunker (langchain_experimental) with OpenAI embeddings: consecutive sentences are embedded, distances between neighbors are computed, and a split is placed wherever the distance exceeds a statistical threshold — percentile (used here at 90), standard deviation, or interquartile. The resulting variable-length, topically coherent chunks are embedded with OpenAIEmbeddings and indexed in a FAISS vector store; a k=2 retriever serves queries. It addresses failures where fixed character/token splitters cut sentences or ideas mid-thought, producing chunks that mix topics or lose the sentence completing a fact, degrading both embedding quality and answer grounding. Best for long discursive documents (reports, papers, legal text) lacking reliable structural markers. Costs: an extra embedding pass over every sentence at index time, unpredictable chunk sizes (some oversized, some tiny), per-corpus threshold tuning, and no awareness of explicit structure like headings or tables.",
+  "notes_for_chunking": "Structure: one giant front-loaded markdown overview cell (cell-1) contains essentially the entire method description (overview, motivation, breakpoint types, benefits, conclusion) — it is self-contained and should be the primary text chunk. After it, the notebook is a sequence of tiny single-purpose code cells (1-3 lines each) preceded by short '###' markdown headers ('Define file path', 'Read PDF to string', 'Split original text to semantic chunks', 'Create vector store and retriever', 'Test the retriever'); each header+code pair is only meaningful as a unit, so keep header and following code together. One mid-notebook markdown cell usefully documents the three breakpoint_threshold_type options — high signal, keep with the SemanticChunker instantiation cell. Junk to strip: cell-0 book-promo/marketing block, pip install cell, git-clone + sys.path boilerplate, wget data-download cell (contains a duplicated wget line), image-embed cell referencing ../images/*.svg, and the trailing tracking-pixel markdown cell. No stored outputs or base64 blobs. Caveat for code-as-ground-truth: 'from helper_functions import *' hides where FAISS, read_pdf_to_string, retrieve_context_per_question, and show_context come from — resolve against the repo-root helper_functions.py.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/semantic_chunking.json"
+}

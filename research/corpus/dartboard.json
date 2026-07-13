@@ -1,0 +1,74 @@
+{
+  "slug": "dartboard",
+  "title": "Dartboard Retrieval (Relevance + Diversity Optimized Selection)",
+  "one_liner": "Greedy selection over an oversampled candidate pool that jointly optimizes relevance to the query and diversity among selected chunks, so top-k results stop repeating the same information.",
+  "stage": "retrieval",
+  "problem_solved": "In dense or overlapping knowledge bases, plain top-k similarity retrieval returns multiple near-identical chunks: the context window fills with repetitions of one passage instead of complementary information, hurting answer coverage and wasting tokens.",
+  "failure_modes": [
+    "My top-k retrieved chunks are near-duplicates of each other — the context repeats the same passage instead of covering different facts",
+    "My corpus contains many copies or versions of the same content (re-ingested files, mirrored docs, boilerplate) and retrieval keeps surfacing the duplicates",
+    "Broad or multi-faceted questions get answered from only one aspect because retrieval collapses onto a single dominant passage",
+    "Increasing k doesn't add new information — the extra chunks are redundant and just pollute the context window"
+  ],
+  "when_to_use": [
+    "Your knowledge base is dense/overlapping: multiple document versions, scraped or duplicated content, heavy shared boilerplate",
+    "You inspect top-k results and see repeated or heavily overlapping chunks",
+    "You want diversity-aware retrieval without any extra LLM calls or LLM-reranker latency — it's pure numpy/scipy over embeddings",
+    "You want a principled, tunable alternative to MMR (probabilistic 'relevant information gain' with explicit RELEVANCE_WEIGHT / DIVERSITY_WEIGHT / SIGMA knobs)",
+    "You already have query-to-doc and doc-to-doc distances from any source — dense cosine, hybrid/fusion (dense+BM25), or cross-encoder scores — since the algorithm only needs distance matrices"
+  ],
+  "tradeoffs": [
+    "Extra compute at query time: an O(N^2) pairwise distance matrix over the oversampled candidate set plus a greedy loop per selected document — fine for tens to low hundreds of candidates, not thousands",
+    "Requires access to candidate embedding vectors (notebook uses FAISS index.reconstruct_batch); not every vector store exposes stored vectors cheaply",
+    "Three hyperparameters (SIGMA smoothing, RELEVANCE_WEIGHT, DIVERSITY_WEIGHT) must be tuned to the dataset's density; over-weighting diversity surfaces less-relevant chunks",
+    "Adds complexity for little gain if your corpus is already deduplicated and non-redundant — exact duplicates are cheaper to remove at indexing time",
+    "The notebook's own stored demo output still shows one duplicate in the final top-3, so out-of-the-box defaults are not guaranteed to fully de-duplicate; expect tuning"
+  ],
+  "how_it_works": "Based on 'Better RAG using Relevant Information Gain' (arXiv:2407.12101), vanilla variant with added weights. Setup: a PDF is chunked (RecursiveCharacterTextSplitter, 1000/200) and embedded with OpenAI embeddings into FAISS; the corpus is loaded 5x to simulate a dense, redundant knowledge base, and baseline top-k retrieval is shown returning three identical chunks. Dartboard retrieval (get_context_with_dartboard) then: (1) embeds the query and fetches num_results * oversampling_factor (default 3x) candidates from the raw FAISS index; (2) reconstructs candidate vectors via index.reconstruct_batch and computes 1 - cosine similarity distance matrices, query-to-candidates and candidates-to-candidates; (3) runs greedy_dartsearch: distances are converted to log-normal log-probabilities via lognorm(dist, SIGMA), the most relevant document is picked first, then each iteration picks the unselected document maximizing logsumexp(max-so-far doc-doc probability * DIVERSITY_WEIGHT + query probability * RELEVANCE_WEIGHT), masking already-selected docs; (4) returns selected texts plus scores. Though invoked as the retrieval step (a drop-in replacement for simple top-k get_context), it effectively acts as a post-retrieval selection/rerank layer over the oversampled pool; the markdown notes hybrid/fusion or cross-encoder scores can supply the distances instead of dense cosine. No LLM calls are made by the technique itself.",
+  "key_dependencies": [
+    "numpy",
+    "scipy (scipy.special.logsumexp)",
+    "langchain + FAISS (PyPDFLoader, RecursiveCharacterTextSplitter, FAISS vector store — via repo helper_functions wildcard import)",
+    "OpenAI embeddings API (swappable for Amazon Bedrock via get_langchain_embedding_provider)",
+    "python-dotenv",
+    "repo modules: helper_functions.py, evaluation/evalute_rag.py"
+  ],
+  "key_code_signals": [
+    "greedy_dartsearch(query_distances, document_distances, documents, num_results) — the core greedy relevance+diversity selection loop",
+    "lognorm(dist, sigma) — converts distances to log-normal log-probabilities; SIGMA is the smoothing knob",
+    "combined_scores = updated_distances * DIVERSITY_WEIGHT + query_probabilities * RELEVANCE_WEIGHT, reduced with scipy.special.logsumexp",
+    "chunks_vector_store.index.search(query_vec, k=num_results * oversampling_factor) — oversampled candidate fetch from the raw FAISS index",
+    "chunks_vector_store.index.reconstruct_batch(candidate_indices) — recovers candidate embedding vectors from FAISS for the pairwise matrix",
+    "document_distances = 1 - np.dot(candidate_vectors, candidate_vectors.T) — pairwise cosine-distance matrix between candidates",
+    "documents = documents * 5 in encode_pdf — deliberately duplicates the corpus to demonstrate the redundancy failure mode"
+  ],
+  "related_techniques": [
+    "reranking: alternative — cross-encoder rerankers optimize relevance only, dartboard also optimizes diversity; cross-encoder scores can even supply dartboard's distances",
+    "fusion-retrieval: composes — merged dense+sparse similarities can be converted to the single distance matrix dartboard consumes",
+    "simple-rag: refines — get_context_with_dartboard is a drop-in replacement for simple top-k get_context",
+    "contextual-compression: alternative — reduces context pollution by compressing retrieved chunks instead of diversifying the selection",
+    "multi-faceted-filtering: related — another non-LLM filtering strategy applied to retrieved candidates"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "dartboard retrieval",
+    "diversity retrieval",
+    "redundant chunks",
+    "duplicate documents",
+    "near-duplicate results",
+    "MMR alternative",
+    "maximal marginal relevance",
+    "relevant information gain",
+    "relevance diversity tradeoff",
+    "top-k redundancy",
+    "deduplicate retrieval results",
+    "dense knowledge base",
+    "information coverage",
+    "greedy document selection",
+    "diverse top-k",
+    "FAISS reranking"
+  ],
+  "summary": "Dartboard RAG replaces plain top-k similarity retrieval with a greedy selection that jointly optimizes relevance to the query and diversity among returned chunks, implementing the 'relevant information gain' objective from arXiv:2407.12101. It targets dense, overlapping knowledge bases where top-k retrieval returns near-duplicate chunks — the notebook simulates this by ingesting the same PDF five times and shows the baseline top-3 results being identical. The method oversamples candidates from FAISS (num_results * oversampling_factor), reconstructs their embedding vectors, builds query-to-doc and doc-to-doc cosine-distance matrices, converts distances to log-normal probabilities (SIGMA smoothing), then greedily picks documents maximizing a logsumexp-combined score of RELEVANCE_WEIGHT * query relevance plus DIVERSITY_WEIGHT * distance from already-selected documents. It makes no LLM calls — pure numpy/scipy over embeddings — so the cost is a small O(N^2) matrix over the candidate pool. Use it when retrieved contexts repeat the same information, when the corpus holds many duplicates or versions, or as a smoother, tunable alternative to MMR; skip it for already-deduplicated corpora. Distances from hybrid/fusion or cross-encoder retrieval plug in directly.",
+  "notes_for_chunking": "Well-structured notebook with clear section headers: one long self-contained overview markdown cell (motivation, paper link, method details, hybrid/cross-encoder guidance) followed by headed sections (### Read Docs, ### Encode document, ## Greedy Dartboard Search, ## Dartboard Context Retrieval). Strip: the leading book-promo/ad cell, pip-install cell, git-clone + sys.path Colab-compat cell, the wget data-download cell (contains a duplicated wget line), and the trailing analytics tracking-pixel markdown cell. The two core code cells (greedy_dartsearch with the DIVERSITY_WEIGHT/RELEVANCE_WEIGHT/SIGMA constants, and get_context_with_dartboard) have strong docstrings and each pairs naturally with the markdown cell immediately above it — keep those pairs together. The wildcard 'from helper_functions import *' hides the LangChain/FAISS dependencies (PyPDFLoader, FAISS, show_context), so keep the import cell attached or annotate. Cell outputs are long repeated PDF text from show_context (baseline vs dartboard comparison) — strip or truncate. Caution: stored demo output is stale — the final cell calls get_context_with_dartboard(test_query, k=3) although the signature takes num_results, and the 'no repetitions' claim is not fully supported by the shown output (contexts 1 and 3 are identical).",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/dartboard.json"
+}

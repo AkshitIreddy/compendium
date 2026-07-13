@@ -1,0 +1,86 @@
+{
+  "slug": "end-2-end_rag_evaluation",
+  "title": "End-to-End RAG Evaluation Pipeline",
+  "one_liner": "Build a multi-dimensional RAG evaluation pipeline that derives criteria from real human-annotated failures, benchmarks LLM-as-a-judge completeness metrics against those labels, adds RAGAS faithfulness for hallucination detection, and gates outputs with per-criterion pass/fail thresholds.",
+  "stage": "evaluation",
+  "problem_solved": "Teams shipping RAG systems have no reliable, automated way to tell whether generated answers are actually good enough for end users. Single aggregate metrics (or a single LLM-as-a-judge call scoring everything at once) hide which dimension failed, drift from what human annotators actually complain about, and average away critical failures like hallucination. This notebook shows how to turn a set of human-annotated good/bad responses into a validated, automated, multi-metric evaluation pipeline whose components (completeness judge, RAGAS faithfulness) are each benchmarked against the human labels before being combined via pass/fail thresholds.",
+  "failure_modes": [
+    "I can't tell if my RAG system's answers are actually good without manually reviewing every response",
+    "My answers are missing key information the retrieved context contained (incompleteness), but no metric catches it",
+    "My RAG system hallucinates facts not supported by the retrieved context and I have no automated detector",
+    "A single overall quality score masks which specific dimension (completeness, factuality, contradiction) is failing",
+    "A naive one-shot LLM-as-a-judge prompt agrees with human labels poorly, especially on negative examples",
+    "I changed my pipeline (chunking, retriever, prompt) and have no regression signal to know if quality improved or degraded",
+    "Averaging scores across criteria lets a factually wrong answer pass because it scored well on fluency"
+  ],
+  "when_to_use": [
+    "You have (or can collect) a set of human-annotated responses with free-text reasons for why answers were marked bad",
+    "You are about to iterate on a production RAG system and need an automated quality gate before shipping changes",
+    "Your outputs are client-facing and a single failing dimension (e.g., a fabricated fact) should fail the whole answer regardless of other scores",
+    "You suspect your current LLM-judge prompt is unreliable and want to validate it against human labels with precision/recall before trusting it",
+    "Different failure categories dominate your feedback (incomplete vs hallucinated vs contradictory) and you need separate metrics per category",
+    "You want to know whether an off-the-shelf metric like RAGAS faithfulness is actually accurate on YOUR domain before adopting it"
+  ],
+  "tradeoffs": [
+    "Requires a human-annotated dataset with annotation reasoning; without real labeled failures the criteria-selection and metric-benchmarking steps have nothing to validate against",
+    "Multiple LLM calls per evaluated sample (one per criterion, plus RAGAS's internal claim-decomposition calls) — evaluation cost scales linearly with metrics x samples",
+    "LLM-as-a-judge metrics need iteration: the notebook's naive binary prompt failed on negatives and had to be redesigned with reasoning-first, 3-level rubric scoring",
+    "Off-the-shelf metrics can underperform on domain-specific tasks — the notebook itself finds RAGAS faithfulness falls short on its use case, so budget for custom metric research",
+    "This is offline/batch evaluation, not a runtime technique — it does not improve retrieval or generation by itself, only measures them",
+    "Threshold-based pass/fail aggregation requires tuning per-criterion thresholds to match real-world standards; wrong thresholds silently misclassify",
+    "Not worth the setup for prototypes or low-stakes internal tools where spot-checking suffices"
+  ],
+  "how_it_works": "Five steps, all operating at the evaluation stage. (1) Criteria selection: load a CSV of human-annotated QA responses (question, retrieved context, output, good/bad annotation, free-text reasoning); an LLM summarizes the bad-annotation reasons into ~4 failure categories (incomplete, inconcise, hallucination, contradiction). (2) Benchmark construction: rather than treating all 'bad' samples as incomplete, an LLM classifier (AsyncOpenAI structured output with a Pydantic CompletenessRelated model) filters bad samples to true completeness failures, then a balanced eval set mixes them with sampled good examples. (3) Completeness metric: a naive binary complete/incomplete judge is scored with sklearn classification_report against human labels and shown to fail on negatives; an advanced judge (reasoning field first, 0/1/2 rubric, gpt-4.1-mini) is then benchmarked and performs reliably. (4) Hallucination detection: a factuality eval set is built the same way and RAGAS's faithfulness metric (SingleTurnSample, EvaluationDataset, ChatOpenAI gpt-4.1 as judge, 0.5 threshold binarization) is benchmarked — and found insufficient for the domain. (5) Aggregation: per-criterion scores are combined with pass/fail thresholds (fail factuality OR fail completeness => bad, with the failing dimension reported), explicitly rejecting score averaging; the final pipeline's annotations are compared to human labels. Infrastructure: async batched OpenAI calls (asyncio.gather) with exponential-backoff retry and temperature 0. Note: the final aggregation cell is illustrative pseudocode (undefined helper functions and thresholds), not runnable as-is.",
+  "key_dependencies": [
+    "openai (AsyncOpenAI, beta structured-output parse)",
+    "ragas (faithfulness metric, evaluate, EvaluationDataset, SingleTurnSample)",
+    "langchain (ChatOpenAI as RAGAS judge LLM)",
+    "pydantic (BaseModel response schemas)",
+    "pandas (annotated dataset handling)",
+    "scikit-learn (classification_report for metric-vs-human benchmarking)",
+    "asyncio (concurrent LLM judge calls)",
+    "python-dotenv"
+  ],
+  "key_code_signals": [
+    "client.beta.chat.completions.parse(..., response_format=response_model) — structured LLM-as-a-judge outputs via Pydantic models",
+    "class CompletenessScore(BaseModel): reasoning: str; score: ScoreValue — reasoning-before-score judge schema with an int Enum rubric (0/1/2)",
+    "classification_report(completeness_eval_df.annotation, completeness_eval_df.advenced_method) — benchmarking judge predictions against human labels",
+    "from ragas.metrics import faithfulness; evaluate(EvaluationDataset(samples=samples), metrics=[faithfulness], llm=langchain_client) — RAGAS hallucination detection",
+    "SingleTurnSample(user_input=..., response=..., retrieved_contexts=[...]) — RAGAS sample construction from question/answer/context triples",
+    "asyncio.gather(*tasks) inside run_llm_calls — batched async judge calls with exponential-backoff retry",
+    "get_final_annotation: if factual_score < FACTUALITY_THRESHOLD -> 'bad' — per-criterion pass/fail gating instead of score averaging",
+    "only_bad['completeness_related'] = [r.has_completeness_problem for r in responses] — LLM-based filtering of bad samples into failure categories"
+  ],
+  "related_techniques": [
+    "open-rag-eval-example: alternative (framework-based RAG evaluation toolkit vs this hand-rolled validated pipeline)",
+    "grouse: alternative (grounded-QA evaluation with the 6-metric GroUSE framework and judge unit tests)",
+    "deep_evaluation / deepeval: alternative (DeepEval library metrics like correctness, faithfulness, contextual relevancy)",
+    "evaluation-with-ragas: refines (this notebook benchmarks RAGAS faithfulness against human labels instead of trusting it blindly)",
+    "simple_rag: evaluates (any generation pipeline like basic RAG is the system under test for this pipeline)",
+    "self_rag: complements (Self-RAG does runtime self-critique; this does offline batch evaluation of final outputs)",
+    "crag: complements (corrective RAG acts at retrieval time; this measures end-output quality against human standards)"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "rag evaluation",
+    "llm as a judge",
+    "ragas",
+    "faithfulness",
+    "hallucination detection",
+    "completeness metric",
+    "evaluation pipeline",
+    "human annotation",
+    "benchmark llm judge",
+    "classification report",
+    "pass fail thresholds",
+    "answer quality",
+    "factual correctness",
+    "eval set construction",
+    "structured outputs",
+    "quality gate",
+    "regression testing rag"
+  ],
+  "summary": "End-to-end RAG evaluation pipeline that replaces single-score judging with multiple validated, failure-specific metrics. Starting from human-annotated good/bad responses with free-text reasoning, an LLM clusters the bad-response reasons into failure categories (incomplete, hallucinated, contradictory, inconcise). For each category a dedicated benchmark is built by LLM-filtering bad samples to true instances of that failure and mixing in good samples. A completeness LLM-as-a-judge is then developed iteratively: a naive binary prompt is benchmarked with sklearn classification_report against the human labels and shown to miss negatives; an improved judge with reasoning-first structured output (Pydantic) and a 0/1/2 rubric performs reliably. Hallucination detection uses RAGAS faithfulness (SingleTurnSample over question/answer/retrieved-context triples, GPT-4.1 judge), which is itself benchmarked and found insufficient for the domain — demonstrating why off-the-shelf metrics must be validated. Finally, per-criterion scores are aggregated with pass/fail thresholds (any critical failure fails the answer) rather than averaging. Solves: no automated quality signal, judges disagreeing with humans, hallucinations slipping through, averaged scores masking critical failures. Costs: needs labeled data and multiple LLM calls per sample.",
+  "notes_for_chunking": "Well-structured tutorial notebook with clean H1 step headers ('# Step 1 - Choosing Evaluation Criteria' ... '# Step 5 - Aggragate to an end-2-end evaluation pipeline', note typos 'Aggragate'/'advenced' in headers and column names) plus '# Summary'. Roughly balanced markdown/code ratio; markdown cells carry substantial reasoning (why naive judge fails, why not to average scores) and should stay attached to the code they explain. Natural chunk boundaries are the Step headers; each step is fairly self-contained, but Steps 2-3 (benchmark + completeness metric) and Step 4 reuse the shared 'Utils' cell (cell-2: run_llm_call/run_llm_calls async helpers) — a chunker should propagate or reference that utils cell as context for all later code chunks. Prompt templates are embedded as triple-quoted strings inside code cells and are high-value retrieval content, not junk. No pip-install cells and no giant outputs or base64 blobs in this notebook (outputs not stored). Beware: the Step 5 code cell references undefined functions (evalaute_factuality_via_ragas, evalaute_completeness_via_llm_as_judge) and constants — it is illustrative pseudocode; a chunker/labeler should not index it as runnable implementation. Data is loaded from a hardcoded figshare CSV URL in cell-4.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/end-2-end_rag_evaluation.json"
+}

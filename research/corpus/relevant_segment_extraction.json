@@ -1,0 +1,86 @@
+{
+  "slug": "relevant_segment_extraction",
+  "title": "Relevant Segment Extraction (RSE)",
+  "one_liner": "Post-retrieval step that reconstructs contiguous multi-chunk document segments around clusters of relevant chunks, so the LLM sees complete in-order sections instead of isolated top-k fragments.",
+  "stage": "post-retrieval",
+  "problem_solved": "Fixed-size chunking forces a bad tradeoff: small chunks retrieve precisely but strip surrounding context, while large chunks carry context but retrieve poorly. Top-k retrieval also returns chunks out of document order and misses chunks that are essential but individually score as irrelevant (e.g. the middle rows of a financial statement sandwiched between high-scoring chunks). RSE dynamically sizes the returned context per query by finding contiguous spans of high-relevance chunks and returning them whole and in order.",
+  "failure_modes": [
+    "Retrieved chunks lack the surrounding context needed to actually answer the question",
+    "Answers that span a whole section or table get fragmented because only a few of its chunks score as relevant",
+    "Chunks arrive at the LLM out of document order, breaking the flow of multi-chunk content like financial statements or legal arguments",
+    "One fixed chunk size can't serve both single-sentence factoid queries and broad section-level queries",
+    "Important 'connector' chunks sandwiched between relevant chunks are dropped because the reranker scores them low individually",
+    "Top-k retrieval wastes context budget on scattered isolated chunks instead of one coherent passage"
+  ],
+  "when_to_use": [
+    "Your documents are long reports (10-Ks, annual reports, academic papers, legal opinions) where facts depend on surrounding sections",
+    "Queries range from narrow factoids to broad 'summarize/explain the whole section' questions against the same corpus",
+    "You observe that relevant chunks cluster together in source documents (plot chunk relevance by index to check)",
+    "You already run a reranker and want a cheap (~5-10ms, no extra LLM calls) post-processing step with large measured accuracy gains",
+    "Multi-chunk structured content like consolidated financial statements or multi-page tables must be presented intact",
+    "You control the indexing pipeline and can chunk with zero overlap and store chunks keyed by doc_id + chunk_index"
+  ],
+  "tradeoffs": [
+    "Requires chunking with no overlap so segments can be reconstructed by concatenation — incompatible with overlapping-chunk indexes without re-indexing",
+    "Needs a key-value store (doc_id, chunk_index -> text) alongside the vector DB, since segments include chunks never returned by search",
+    "Works best with a reranker (Cohere Rerank here), adding a paid API dependency and per-query rerank latency/cost",
+    "The notebook's brute-force max-subarray search is demo-grade; production needs the more sophisticated dsRAG implementation",
+    "Segments can overshoot the ideal boundary and include bonus chunks you don't need, spending some context budget",
+    "Several tunables (irrelevant_chunk_penalty ~0.2, decay_rate, max_length, overall_max_length, minimum_value) need empirical tuning per corpus",
+    "No benefit for corpora of short independent documents (FAQs, tickets) where relevant chunks don't cluster — it just reduces to top-k",
+    "Notebook simplifies by reranking all 500 chunks of one document directly; at corpus scale you still need vector/keyword search to narrow candidates first"
+  ],
+  "how_it_works": "Operates after vector search and reranking, before generation (composes with chunking constraints at indexing time). 1) Documents are split with RecursiveCharacterTextSplitter at chunk_size=800 and chunk_overlap=0 so contiguous chunks can be concatenated back into segments. 2) Cohere Rerank (rerank-english-v3.0) scores every candidate chunk against the query; scores are spread out with a beta CDF transform (a=b=0.4) because raw reranker scores bunch near 0 and 1. 3) Each chunk's value fuses absolute relevance with relevance rank via exponential decay: chunk_value = exp(-rank/decay_rate) * transformed_score, which is more robust than score or rank alone. 4) A constant irrelevant_chunk_penalty (~0.2) is subtracted so irrelevant chunks go negative; segment value is then simply the sum of its chunk values, turning segment selection into a constrained maximum-sum-subarray problem. 5) get_best_segments greedily brute-force searches for non-overlapping (start, end) spans subject to max_length per segment, overall_max_length across segments, and a minimum_value threshold, skipping negative-valued endpoints (~5-10ms). Selected segments are returned in original document order; when relevance is isolated rather than clustered, the method degrades gracefully to standard top-k. Evals: KITE average 4.72 -> 6.73 vs top-k=20; combined with contextual chunk headers, 83% vs 19% baseline on FinanceBench.",
+  "key_dependencies": [
+    "cohere (Rerank API, rerank-english-v3.0)",
+    "langchain_text_splitters (RecursiveCharacterTextSplitter)",
+    "numpy",
+    "scipy (scipy.stats.beta)",
+    "matplotlib (relevance visualization only)",
+    "python-dotenv"
+  ],
+  "key_code_signals": [
+    "RecursiveCharacterTextSplitter(chunk_size=800, chunk_overlap=0) — zero-overlap chunking so segments concatenate cleanly",
+    "cohere.Client().rerank(model='rerank-english-v3.0', query=query, documents=chunks)",
+    "beta.cdf(x, 0.4, 0.4) transform to spread clustered reranker scores toward uniform",
+    "chunk_values[index] = np.exp(-i/decay_rate) * absolute_relevance_value — fusion of rank decay and similarity score",
+    "relevance_values = [v - irrelevant_chunk_penalty for v in chunk_values] — thresholding so irrelevant chunks go negative",
+    "get_best_segments(relevance_values, max_length, overall_max_length, minimum_value) — constrained maximum-sum-subarray optimization returning (start, end) spans",
+    "plot_relevance_scores() scatter of chunk relevance vs chunk index to reveal clustering"
+  ],
+  "related_techniques": [
+    "context_enrichment_window_around_chunk: alternative — fixed-size neighbor windows vs RSE's query-adaptive optimized segments",
+    "contextual_chunk_headers: composes — evaluated jointly with RSE on FinanceBench (83% vs 19% baseline)",
+    "reranking: prerequisite — RSE consumes reranker relevance scores as its input signal",
+    "choose_chunk_size: refines — RSE dissolves the fixed-chunk-size tradeoff by sizing context dynamically per query",
+    "semantic_chunking: alternative — attacks the same context-fragmentation problem at chunking time instead of post-retrieval",
+    "contextual_compression: complementary-opposite — compression shrinks retrieved context, RSE expands it to complete segments",
+    "dsRAG (external library): production implementation of RSE referenced by the notebook"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "relevant segment extraction",
+    "RSE",
+    "multi-chunk segments",
+    "contiguous chunks",
+    "chunk clustering",
+    "context expansion",
+    "maximum sum subarray",
+    "reranker scores",
+    "cohere rerank",
+    "chunk size tradeoff",
+    "sandwiched chunks",
+    "document order",
+    "post-retrieval processing",
+    "dynamic context window",
+    "financial statements retrieval",
+    "long document RAG",
+    "dsRAG",
+    "10-K",
+    "FinanceBench",
+    "KITE benchmark"
+  ],
+  "summary": "Relevant Segment Extraction (RSE) is a post-retrieval step that reconstructs contiguous multi-chunk segments from source documents instead of feeding isolated, out-of-order top-k chunks to the LLM. It exploits the observation that relevant chunks cluster within documents. After search and reranking, each chunk gets a value fusing its Cohere reranker score (spread via a beta CDF transform) with an exponential rank decay; subtracting a constant irrelevant_chunk_penalty (~0.2) makes irrelevant chunks negative, so a segment's value is the sum of its chunk values and finding optimal segments becomes a constrained maximum-sum-subarray problem solved by brute force in ~5-10ms with no extra LLM calls. This recovers 'sandwiched' chunks the reranker scored low, presents text in original document order, and adapts context size per query — short for factoids, whole sections for broad questions — degrading gracefully to top-k when relevance is isolated. Requires zero-overlap chunking and a doc_id/chunk_index key-value store. KITE benchmark: 4.72 to 6.73 average vs top-k=20; with contextual chunk headers, 83% on FinanceBench vs 19% baseline. Production implementation lives in the dsRAG library.",
+  "notes_for_chunking": "High-quality notebook for chunking: strong markdown headers (Overview, Motivation, Key Components, Method Details, Setup, chunk-relevance visualization, segment optimization, Eval results) with roughly 50/50 markdown/code ratio and unusually explanatory markdown — the conceptual cells (cell-1, cell-19, cell-22, cell-23) are self-contained and embed well on their own. Code cells carry detailed docstrings that restate intent, so code+preceding-markdown pairs make natural chunks. Junk to strip: leading book-promotion cell (cell-0), pip-install cell (cell-5), wget data-download cell (cell-9), the view-tracker image cell at the end (cell-24), and two large matplotlib base64 image outputs (cells 13 and 15). The plot_relevance_scores and print_document_segment helpers are boilerplate visualization, low retrieval value. The Eval results section (KITE tables, FinanceBench numbers) is a distinct self-contained unit worth keeping as its own chunk. Interleaved output cells (segment indices/scores) are small and informative, safe to keep inline.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/relevant_segment_extraction.json"
+}

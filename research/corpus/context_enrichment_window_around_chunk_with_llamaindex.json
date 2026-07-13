@@ -1,0 +1,76 @@
+{
+  "slug": "context_enrichment_window_around_chunk_with_llamaindex",
+  "title": "Context Enrichment Window (Sentence-Window Retrieval) with LlamaIndex",
+  "one_liner": "Embed and retrieve at single-sentence granularity, then swap each retrieved sentence for its stored window of surrounding sentences before generation, using LlamaIndex's SentenceWindowNodeParser and MetadataReplacementPostProcessor.",
+  "stage": "chunking",
+  "problem_solved": "Standard vector search returns isolated text fragments: small chunks embed precisely but lack the surrounding context the LLM needs to answer coherently, while large chunks dilute the embedding and hurt retrieval precision. This technique decouples the two granularities — match on a single sentence, generate from a multi-sentence window around it.",
+  "failure_modes": [
+    "The chunk my retriever returns is technically relevant but too short/fragmentary for the LLM to produce a complete answer",
+    "Retrieved chunks lack the surrounding context needed to understand them (pronouns, definitions, or arguments that start in a neighboring sentence)",
+    "Making chunks bigger to capture context made retrieval precision worse (embeddings became diluted and matched the wrong passages)",
+    "Answers read as disjointed because the model only sees isolated snippets instead of coherent passages",
+    "Facts in my documents depend on the sentences immediately before/after the one that matches the query"
+  ],
+  "when_to_use": [
+    "Your documents are continuous prose (reports, articles, books) where meaning flows across neighboring sentences rather than being self-contained per paragraph",
+    "You observe high retrieval precision but incomplete or context-starved answers — the right sentence is found but the answer needs its neighbors",
+    "You want a cheap, no-extra-LLM-call fix: the enrichment is precomputed at ingestion and applied as a mechanical metadata swap at query time",
+    "You are already on LlamaIndex and want a built-in, two-class solution (SentenceWindowNodeParser + MetadataReplacementPostProcessor) instead of custom neighbor-fetching logic",
+    "You want tunable context expansion (window_size parameter, e.g. 3 sentences each side = 7-sentence window)"
+  ],
+  "tradeoffs": [
+    "Index size grows substantially: one node per sentence, each duplicating its window text in metadata — more embeddings to compute and store than paragraph-level chunking",
+    "Window is fixed and position-based, not relevance-based: it may pull in irrelevant neighboring sentences or still miss context that lives in another section (use hierarchical indices or relevant segment extraction for that)",
+    "Sentence-level embedding can lose topic-level signal; queries about broad themes may match a sentence that is locally relevant but topically off",
+    "Not useful for structured/tabular data, code, or documents where adjacency does not imply semantic continuity (e.g. FAQ lists, slide bullets)",
+    "Enrichment is bounded by window_size chosen at ingestion — changing it requires re-parsing (though not necessarily re-embedding via a different pipeline)",
+    "If your chunks are already large and coherent, this adds index bloat for little gain; the opposite fix (contextual compression) applies when context windows are polluted, not starved"
+  ],
+  "how_it_works": "At ingestion (chunking stage), SentenceWindowNodeParser splits each document into one node per sentence; for each node it stores the concatenation of the surrounding sentences (window_size=3 on each side, i.e. up to 7 sentences) under a 'window' metadata key and the sentence itself under 'original_sentence'. An IngestionPipeline runs this parser and embeds only the single sentence text into a FAISS vector store (IndexFlatL2, 512-dim text-embedding-3-small), so similarity matching stays precise. At query time, a VectorStoreIndex query engine retrieves top-k sentence nodes, then a post-retrieval step — MetadataReplacementPostProcessor(target_metadata_key='window') — replaces each retrieved node's text with its stored window before the nodes are passed to the LLM (gpt-3.5-turbo) for synthesis. The notebook builds a parallel baseline pipeline with a plain SentenceSplitter and compares answers from both query engines (similarity_top_k=1) on a climate-change PDF, printing node metadata to show the window/original_sentence keys. The technique thus spans chunking (dominant: the window is precomputed by the parser) and post-retrieval (the metadata swap); no extra LLM calls are added.",
+  "key_dependencies": [
+    "llama-index (core: Settings, SimpleDirectoryReader, IngestionPipeline, VectorStoreIndex, SentenceWindowNodeParser, SentenceSplitter, MetadataReplacementPostProcessor)",
+    "llama-index-vector-stores-faiss (FaissVectorStore)",
+    "faiss-cpu (IndexFlatL2)",
+    "llama-index OpenAI integrations (OpenAI gpt-3.5-turbo LLM, OpenAIEmbedding text-embedding-3-small at 512 dims)",
+    "python-dotenv (OPENAI_API_KEY loading)"
+  ],
+  "key_code_signals": [
+    "SentenceWindowNodeParser(window_size=3, window_metadata_key='window', original_text_metadata_key='original_sentence')",
+    "MetadataReplacementPostProcessor(target_metadata_key='window') passed as node_postprocessors to as_query_engine()",
+    "IngestionPipeline(transformations=[node_parser], vector_store=vector_store)",
+    "faiss.IndexFlatL2(EMBED_DIMENSION) wrapped in FaissVectorStore",
+    "Baseline comparison pipeline: IngestionPipeline(transformations=[SentenceSplitter()]) and a query engine without postprocessors",
+    "VectorStoreIndex(windowed_nodes).as_query_engine(similarity_top_k=1, node_postprocessors=[...])",
+    "Settings.embed_model = OpenAIEmbedding(model='text-embedding-3-small', dimensions=512); Settings.llm = OpenAI(model='gpt-3.5-turbo')"
+  ],
+  "related_techniques": [
+    "context_enrichment_window_around_chunk: alternative implementation of the same technique (LangChain/FAISS with manual neighbor-chunk fetching instead of LlamaIndex built-ins)",
+    "semantic_chunking: alternative — fixes fragment incoherence at chunk-boundary time instead of expanding after retrieval",
+    "relevant_segment_extraction: alternative/refinement — reconstructs variable-length multi-chunk segments post-retrieval instead of a fixed sentence window",
+    "contextual_chunk_headers: composes — prepends document/section-level context to chunks, complementary to local sentence-window context",
+    "hierarchical_indices: related — another small-to-big strategy (summary-level then detail-level) for precision plus context",
+    "reranking: composes — rerank retrieved sentence nodes before the window replacement step",
+    "contextual_compression: opposite remedy — shrinks retrieved context when the window is polluted rather than starved"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "sentence window retrieval",
+    "context enrichment window",
+    "expand retrieved chunk with neighbors",
+    "surrounding sentences",
+    "small-to-big retrieval",
+    "chunk lacks context",
+    "isolated chunks",
+    "SentenceWindowNodeParser",
+    "MetadataReplacementPostProcessor",
+    "llamaindex",
+    "FAISS",
+    "node postprocessor",
+    "window size",
+    "retrieval granularity vs generation granularity",
+    "incomplete answers from RAG"
+  ],
+  "summary": "Sentence-window retrieval (context enrichment window) fixes the core chunking dilemma: small chunks embed precisely but return isolated fragments that starve the LLM of context, while large chunks dilute embeddings and hurt retrieval precision. This LlamaIndex implementation parses documents into one node per sentence with SentenceWindowNodeParser, storing the surrounding sentences (window_size=3 each side, a 7-sentence window) in node metadata at ingestion. Only the single sentence is embedded (OpenAI text-embedding-3-small, 512 dims) into a FAISS IndexFlatL2 store, keeping similarity matching sharp. At query time, MetadataReplacementPostProcessor swaps each retrieved sentence for its precomputed window before synthesis by gpt-3.5-turbo, so the generator sees a coherent passage instead of a fragment — with zero extra LLM calls and no query-time neighbor lookups. The notebook contrasts this against a plain SentenceSplitter baseline on a climate-change PDF. Costs: many more nodes/embeddings and duplicated window text inflate the index, and the fixed positional window can include irrelevant neighbors. Best for continuous prose where facts depend on adjacent sentences; wrong for tabular data or self-contained chunks.",
+  "notes_for_chunking": "Structure is clean and header-driven: cell-1 is a long, fully self-contained overview markdown (Overview/Motivation/Key Components/Method Details/Benefits/Conclusion) that works as a standalone conceptual chunk; the rest alternates short markdown headers (### Read docs, ## Ingestion Pipelines, ### Ingestion Pipeline with Sentence Splitter, ### Ingestion Pipeline with Sentence Window, ## Querying, ### Querying with/without Metadata Replacement) with short code cells (5-25 lines), so header+code pairing is a natural chunk unit. Junk to strip: cell-0 (promotional book advertisement), the pip-install cell, the wget data-download cell, the image-only markdown cell (cell-2), and the final tracker-pixel markdown cell (cell-26). Note cell-1's markdown mentions a 'custom retrieval function' inherited from the LangChain sibling notebook that does not match this code — code cells are the ground truth. Minor code wart: both baseline and windowed IngestionPipelines write into the same FAISS vector_store, but the queried indexes are built directly from node lists (VectorStoreIndex(base_nodes/windowed_nodes)). No large outputs or base64 blobs in this copy; markdown/code ratio roughly 1:1 outside the big intro cell.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/context_enrichment_window_around_chunk_with_llamaindex.json"
+}

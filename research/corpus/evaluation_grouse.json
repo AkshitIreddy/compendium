@@ -1,0 +1,83 @@
+{
+  "slug": "evaluation_grouse",
+  "title": "GroUSE: Grounded QA Evaluation with a Meta-Evaluated LLM Judge",
+  "one_liner": "Score RAG answers on six grounded-QA metrics (relevancy, completeness, faithfulness, usefulness, positive acceptance, negative rejection) with a GPT-4 judge, then validate any cheaper custom judge against GroUSE unit tests before trusting it.",
+  "stage": "evaluation",
+  "problem_solved": "A single vague 'quality' score cannot tell you WHY a RAG answer is bad, and an LLM-as-judge evaluator is itself an unvalidated model whose scores you have no reason to trust. GroUSE decomposes grounded-QA quality into six diagnostic metrics (is the answer on-topic, does it include everything the references support, is every sentence correctly cited and faithful to its source, does it behave correctly when the references contain no answer) and adds a meta-evaluation harness that measures a candidate judge model against a labeled unit-test benchmark, so you know how reliable your evaluator is before you scale it.",
+  "failure_modes": [
+    "My RAG system's answers sound plausible but I can't tell whether they are actually grounded in the retrieved documents (silent hallucination).",
+    "Answers cite the wrong reference or assert facts that the cited passage does not support, and no metric catches it.",
+    "Answers leave out relevant information that was present in the retrieved context, and my eval only checks correctness, not completeness.",
+    "My system answers confidently even when the retrieved references contain no answer (fails negative rejection), or refuses to answer when the answer is actually in the references (fails positive acceptance).",
+    "I get one opaque quality score and cannot diagnose which failure mode (relevancy vs completeness vs grounding) is hurting me.",
+    "I'm using a cheap LLM as a judge to save money, but I have no idea whether its grades agree with a strong judge or a human — my evaluator itself is unevaluated.",
+    "GPT-4 judging of my full eval set is too expensive, but naively swapping in a smaller judge model produces inconsistent, uncalibrated scores."
+  ],
+  "when_to_use": [
+    "Your RAG system produces grounded, citation-style answers (statements followed by [i] source markers) and you need per-metric diagnostics on the generation stage, not just retrieval metrics.",
+    "You need to test 'no-answer' behavior: whether the system correctly says no document answers the question, and whether extra related information it offers is actually useful.",
+    "You have (or can build) a labeled eval set with gold expected answers and reference passages per question — GroUSE compares actual_output against expected_output given references.",
+    "You want to replace an expensive GPT-4 judge with a cheaper model (e.g. gpt-4o-mini) and need quantitative evidence, via GroUSE unit tests (train set to iterate on prompts, held-out test set for the final check), that the cheap judge is calibrated.",
+    "You want offline regression testing of generation quality: run the same evaluation report across pipeline versions and compare average relevancy/completeness/faithfulness/usefulness."
+  ],
+  "tradeoffs": [
+    "Every sample costs multiple judge-LLM calls (one per metric), and the recommended judge is GPT-4 — expensive and slow at eval-set scale; the notebook's whole second half exists because of this cost.",
+    "Requires labeled data: each EvaluationSample needs an expected_output (gold answer) plus the reference passages, so it is not a zero-setup eval — building the eval set is the real cost.",
+    "Evaluates only the generation/grounding stage; it will not tell you whether retrieval fetched the right chunks (pair it with retrieval-stage metrics or an end-to-end eval).",
+    "The metrics presuppose a grounded-QA answer format with inline [i] citations and a 'No document seems to precisely answer your question' convention; if your system doesn't follow that contract, faithfulness/usefulness scoring is meaningless.",
+    "Default prompts are tuned for GPT-4; using any other judge model requires rewriting four Jinja prompt templates and iterating against the unit-test train set — real prompt-engineering effort, and the notebook notes a small model will likely still underperform GPT-4.",
+    "Passing the GroUSE unit tests does not guarantee a perfect judge on your domain's edge cases; the notebook explicitly warns to stay cautious when reading results.",
+    "Not the right tool if you want runtime/inline answer verification — this is an offline evaluation harness, not a production guardrail."
+  ],
+  "how_it_works": "Two-part workflow using the `grouse` package (from the GroUSE paper, arXiv:2409.06595). Part 1 — evaluation: wrap each test case as an EvaluationSample(input, actual_output, expected_output, references) and pass a list to GroundedQAEvaluator().evaluate(). The evaluator (default judge: GPT-4 via the OpenAI API) grades each sample on the six GroUSE metrics: answer relevancy (1-5, is the content on-topic for the question), completeness (1-5, does the answer include all reference information relevant to the question), faithfulness (0/1, does every sentence cite the right reference and agree with it), usefulness (0/1, when no reference answers the question, is the offered related info valuable), plus positive acceptance and negative rejection (does the system answer when it should and refuse when it should). Each metric returns a grade plus a natural-language justification; results are cached and .report aggregates averages across samples. Part 2 — meta-evaluation (evaluating the evaluator): to build a cheaper judge, write four Jinja2 prompt templates (answer_relevancy/completeness/faithfulness/usefulness .txt.jinja) that instruct the candidate model to grade a reference answer and the actual answer side by side in a strict JSON schema, save them to a directory, and run meta_evaluate_pipeline('gpt-4o-mini', prompts_path, train_set=True) to score the candidate judge against the GroUSE unit-test dataset (HuggingFace illuin/grouse). Iterate prompts on the train split, then confirm on the held-out test split (train_set=False) before adopting the custom judge. The technique operates purely at the evaluation stage of a RAG pipeline, downstream of generation.",
+  "key_dependencies": [
+    "grouse (GroUSE evaluation package by Illuin Technology)",
+    "OpenAI API (GPT-4 default judge; gpt-4o-mini as the custom judge candidate)",
+    "nest_asyncio (notebook-only fix for nested event loops)",
+    "Jinja2 prompt templates (consumed by grouse for custom judges)",
+    "HuggingFace dataset illuin/grouse (unit tests used by meta_evaluate_pipeline)"
+  ],
+  "key_code_signals": [
+    "from grouse import EvaluationSample, GroundedQAEvaluator, meta_evaluate_pipeline",
+    "evaluator = GroundedQAEvaluator()  # default GPT-4 judge",
+    "EvaluationSample(input=..., actual_output=..., expected_output=..., references=[...])",
+    "result.answer_relevancy / result.completeness / result.faithfulness / result.usefulness / result.positive_acceptance / result.negative_rejection",
+    "evaluator.evaluate(eval_samples=[...]).report  # aggregated averages",
+    "open(os.path.join(prompts_path, 'answer_relevancy.txt.jinja'), 'w')  # custom judge prompts",
+    "meta_evaluate_pipeline('gpt-4o-mini', prompts_path, train_set=True)",
+    "meta_evaluate_pipeline('gpt-4o-mini', prompts_path, train_set=False)  # held-out test"
+  ],
+  "related_techniques": [
+    "evaluation_deep_eval: alternative (DeepEval library scoring correctness, faithfulness, contextual relevancy — general-purpose LLM eval vs GroUSE's grounded-QA-specific six metrics and judge meta-evaluation)",
+    "end-2-end_rag_evaluation: complement (evaluates the whole pipeline including retrieval; GroUSE focuses on the final grounded-generation stage)",
+    "reliable_rag: complement (runtime relevancy/hallucination checks inside the pipeline; GroUSE is the offline harness that measures the same failure modes systematically)",
+    "retrieval_with_feedback_loop: composes-with (GroUSE metric reports can serve as the quality signal driving iterative pipeline improvement)",
+    "explainable_retrieval: complement (per-metric justifications on the generation side mirror retrieval-side explanations for debugging)"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "RAG evaluation",
+    "LLM-as-judge",
+    "grounded question answering",
+    "faithfulness",
+    "hallucination detection",
+    "citation grounding",
+    "answer relevancy",
+    "answer completeness",
+    "negative rejection",
+    "positive acceptance",
+    "usefulness metric",
+    "meta-evaluation",
+    "evaluate the evaluator",
+    "judge calibration",
+    "GroUSE benchmark",
+    "custom judge prompts",
+    "gpt-4 judge",
+    "cheap judge model",
+    "unit tests for LLM judge",
+    "evaluation report"
+  ],
+  "summary": "GroUSE evaluates the generation stage of a RAG pipeline with six grounded-QA metrics instead of one opaque score: answer relevancy (1-5), completeness (1-5), faithfulness of citations (0/1), usefulness of related info when no answer exists (0/1), plus positive acceptance and negative rejection for correct answer/refusal behavior. Each RAG output is wrapped as an EvaluationSample (question, actual answer, gold expected answer, retrieved references) and graded by GroundedQAEvaluator with a GPT-4 judge that returns per-metric grades and justifications, aggregated into a report. It catches silent hallucinations, wrong citations, omitted reference facts, and systems that answer when references contain nothing (or refuse when they do). Its distinctive second half solves the 'who judges the judge' problem: because GPT-4 judging is expensive, you write four Jinja prompt templates for a cheaper model (gpt-4o-mini) and run meta_evaluate_pipeline against the GroUSE unit-test dataset — iterating on the train split and confirming on the held-out test split — to quantify judge calibration before trusting it. Requires labeled gold answers and a citation-style ([i]) answer format.",
+  "notes_for_chunking": "Well-structured tutorial notebook with clean, short '###' markdown headers that each scope exactly one small code cell — header+code pairs are natural chunks (e.g. 'Evaluate a good answer' + the good_sample cell). Two distinct halves: (1) metric-by-metric demos using GroundedQAEvaluator with one EvaluationSample per failure type (good/irrelevant/incomplete/unfaithful/useful) — each pair is fully self-contained given the import cell; (2) 'Create your own Judge LLM' — dominated by four very long prompt-template string cells (answer relevancy, completeness, faithfulness, usefulness Jinja prompts) that are the bulk of the notebook's tokens; chunk each prompt cell whole (they are the judge definitions and semantically dense) or index a summary line per prompt. Junk to strip: cell 0 (book advertisement), cell 1 (SVG banner image), cell 2 (empty TODO mermaid comment), and the final tracking-pixel markdown cell. No pip-install cell and no long outputs/base64 blobs present. Keep the import cell (grouse imports) attached or referenced by all code chunks; nest_asyncio cell is boilerplate. References cell contains the BibTeX for the GroUSE paper (arXiv:2409.06595) — useful metadata, low retrieval value.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/evaluation_grouse.json"
+}

@@ -1,0 +1,281 @@
+{
+  "categories": [
+    {
+      "name": "Foundational RAG Techniques",
+      "techniques": [
+        {
+          "name": "Simple RAG (Basic RAG)",
+          "notebook": "all_rag_techniques/simple_rag.ipynb; all_rag_techniques/simple_rag_with_llamaindex.ipynb",
+          "description": "Basic RAG for newcomers: basic retrieval queries with incremental learning mechanisms. LangChain and LlamaIndex variants plus a runnable script (all_rag_techniques_runnable_scripts/simple_rag.py)."
+        },
+        {
+          "name": "Simple RAG using a CSV file",
+          "notebook": "all_rag_techniques/simple_csv_rag.ipynb; all_rag_techniques/simple_csv_rag_with_llamaindex.ipynb",
+          "description": "Basic RAG over CSV files, integrating with OpenAI to build a question-answering system. LangChain and LlamaIndex variants."
+        },
+        {
+          "name": "Reliable RAG",
+          "notebook": "all_rag_techniques/reliable_rag.ipynb",
+          "description": "Enhances Simple RAG with validation and refinement: checks retrieved-document relevancy and highlights the document segments actually used for answering."
+        },
+        {
+          "name": "Choose Chunk Size (Optimizing Chunk Sizes)",
+          "notebook": "all_rag_techniques/choose_chunk_size.ipynb",
+          "description": "Selecting an appropriate fixed text-chunk size to balance context preservation against retrieval efficiency; experiment across sizes. Runnable script available."
+        },
+        {
+          "name": "Proposition Chunking",
+          "notebook": "all_rag_techniques/proposition_chunking.ipynb",
+          "description": "Break text into concise, complete, meaningful factual propositions via an LLM with a custom prompt, then pass them through a grading system checking accuracy, clarity, completeness, and conciseness."
+        },
+        {
+          "name": "Simple RAG with JSON",
+          "notebook": "all_rag_techniques/json_rag.ipynb",
+          "description": "RAG over JSON documents: load multi-field JSON entries, combine the most relevant text fields for embedding, and retrieve the most relevant entries per query. Appears only in the README detailed list (duplicated as a second entry numbered 6), not in the summary table."
+        }
+      ]
+    },
+    {
+      "name": "Query Enhancement",
+      "techniques": [
+        {
+          "name": "Query Transformations",
+          "notebook": "all_rag_techniques/query_transformations.ipynb",
+          "description": "Modify and expand queries to improve retrieval: query rewriting, step-back prompting for broader context, and sub-query decomposition of complex queries. Runnable script available."
+        },
+        {
+          "name": "HyDE (Hypothetical Document Embedding)",
+          "notebook": "all_rag_techniques/HyDe_Hypothetical_Document_Embedding.ipynb",
+          "description": "Generate hypothetical documents/questions that point to relevant locations in the data, improving alignment between queries and documents. Runnable script available."
+        }
+      ]
+    },
+    {
+      "name": "Context and Content Enrichment",
+      "techniques": [
+        {
+          "name": "HyPE (Hypothetical Prompt Embeddings)",
+          "notebook": "all_rag_techniques/HyPE_Hypothetical_Prompt_Embeddings.ipynb",
+          "description": "Precompute multiple hypothetical questions per chunk at indexing time and embed those instead of the chunk, turning retrieval into question-question matching with no LLM call at query time; README claims up to +42pp context precision and +45pp claim recall. Note: the summary table categorizes HyPE under Query Enhancement while the detailed list places it in Context Enrichment; the list's GitHub link points to a non-existent singular filename (HyPE_Hypothetical_Prompt_Embedding.ipynb)."
+        },
+        {
+          "name": "Contextual Chunk Headers (CCH)",
+          "notebook": "all_rag_techniques/contextual_chunk_headers.ipynb",
+          "description": "Create document-level and section-level context headers and prepend them to each chunk before embedding to improve retrieval accuracy. Related open-source engine: dsRAG."
+        },
+        {
+          "name": "Relevant Segment Extraction (RSE)",
+          "notebook": "all_rag_techniques/relevant_segment_extraction.ipynb",
+          "description": "Retrieval post-processing that dynamically constructs longer multi-chunk text segments relevant to a query, giving the LLM more complete context."
+        },
+        {
+          "name": "Context Enrichment Window Around Chunk (Context Window Enhancement)",
+          "notebook": "all_rag_techniques/context_enrichment_window_around_chunk.ipynb; all_rag_techniques/context_enrichment_window_around_chunk_with_llamaindex.ipynb",
+          "description": "Embed individual sentences and extend retrieved context to neighboring sentences before/after the match. LangChain and LlamaIndex variants plus a runnable script."
+        },
+        {
+          "name": "Semantic Chunking",
+          "notebook": "all_rag_techniques/semantic_chunking.ipynb",
+          "description": "Divide documents by semantic coherence (topic boundaries) rather than fixed sizes for more meaningful retrieval units. Runnable script available."
+        },
+        {
+          "name": "Contextual Compression",
+          "notebook": "all_rag_techniques/contextual_compression.ipynb",
+          "description": "Use an LLM to compress or summarize retrieved chunks while preserving the content relevant to the query. Runnable script available."
+        },
+        {
+          "name": "Document Augmentation through Question Generation",
+          "notebook": "all_rag_techniques/document_augmentation.ipynb",
+          "description": "Augment each text fragment with LLM-generated questions that could be asked of it, indexing those to raise the likelihood of retrieving relevant documents. Runnable script available."
+        }
+      ]
+    },
+    {
+      "name": "Advanced Retrieval Methods",
+      "techniques": [
+        {
+          "name": "Fusion Retrieval",
+          "notebook": "all_rag_techniques/fusion_retrieval.ipynb; all_rag_techniques/fusion_retrieval_with_llamaindex.ipynb",
+          "description": "Combine keyword-based (BM25) search with vector-based search for more comprehensive and accurate retrieval. LangChain and LlamaIndex variants plus a runnable script."
+        },
+        {
+          "name": "Intelligent Reranking",
+          "notebook": "all_rag_techniques/reranking.ipynb; all_rag_techniques/reranking_with_llamaindex.ipynb",
+          "description": "Improve relevance ranking of retrieved results via LLM-based scoring, cross-encoder models, and metadata-enhanced ranking. LangChain and LlamaIndex variants plus a runnable script."
+        },
+        {
+          "name": "Multi-faceted Filtering",
+          "notebook": "",
+          "description": "Conceptual entry with NO notebook in the repo: metadata filtering, similarity-score thresholds, content filtering, and diversity filtering to refine retrieved results. The summary table links to all_rag_techniques/multi_faceted_filtering.ipynb, which does not exist; the detailed-list entry has no links at all."
+        },
+        {
+          "name": "Hierarchical Indices",
+          "notebook": "all_rag_techniques/hierarchical_indices.ipynb",
+          "description": "Two-tiered index of document summaries plus detailed chunks, both carrying metadata pointing to the same data location, for efficient navigation and retrieval. Runnable script available."
+        },
+        {
+          "name": "Dartboard Retrieval",
+          "notebook": "all_rag_techniques/dartboard.ipynb",
+          "description": "Optimize relevant information gain by combining relevance and diversity into a single scoring function; POC shows it outperforming plain RAG on dense databases. (README detailed list skips number 19 and labels this 20.)"
+        },
+        {
+          "name": "Multi-modal Retrieval",
+          "notebook": "all_rag_techniques/multi_model_rag_with_captioning.ipynb; all_rag_techniques/multi_model_rag_with_colpali.ipynb",
+          "description": "Extend RAG to diverse data types: (a) caption multimedia (PDFs, PPTs, images) and store captions with text in the vector store; (b) ColPali variant converts all data to images and passes the most relevant images to a vision LLM. Only the captioning variant appears in the summary table. Note the repo's 'multi_model' (sic) spelling."
+        }
+      ]
+    },
+    {
+      "name": "Iterative and Adaptive Techniques",
+      "techniques": [
+        {
+          "name": "Retrieval with Feedback Loops",
+          "notebook": "all_rag_techniques/retrieval_with_feedback_loop.ipynb",
+          "description": "Collect user feedback on relevance/quality of retrieved documents and generated responses, using it to fine-tune retrieval and ranking. Runnable script available."
+        },
+        {
+          "name": "Adaptive Retrieval",
+          "notebook": "all_rag_techniques/adaptive_retrieval.ipynb",
+          "description": "Classify queries into categories and apply tailored retrieval strategies per category, considering user context and preferences. Runnable script available."
+        }
+      ]
+    },
+    {
+      "name": "Evaluation",
+      "techniques": [
+        {
+          "name": "DeepEval Evaluation",
+          "notebook": "evaluation/evaluation_deep_eval.ipynb",
+          "description": "Comprehensive RAG evaluation with the deepeval library: test cases for correctness, faithfulness, and contextual relevancy."
+        },
+        {
+          "name": "GroUSE Evaluation",
+          "notebook": "evaluation/evaluation_grouse.ipynb",
+          "description": "Evaluate grounded LLM generations on the 6 GroUSE-framework metrics with GPT-4, and meta-evaluate a custom Llama 3.1 405B judge using GroUSE unit tests."
+        },
+        {
+          "name": "End-to-End RAG Evaluation",
+          "notebook": "evaluation/end-2-end_rag_evaluation.ipynb",
+          "description": "Full evaluation pipeline: criteria selection, LLM-as-a-judge metrics, RAGAS integration, and custom metrics for completeness, relevance, and hallucination detection using the RAG-12000 dataset."
+        },
+        {
+          "name": "Open-RAG-Eval",
+          "notebook": "evaluation/open-rag-eval-example.ipynb",
+          "description": "Open-source RAG evaluation with the open-rag-eval library: UMBRELA scoring, AutoNuggetizer, and citation/hallucination detection against the FIQA financial dataset."
+        }
+      ]
+    },
+    {
+      "name": "Memory-Augmented Retrieval",
+      "techniques": [
+        {
+          "name": "MemoRAG",
+          "notebook": "all_rag_techniques/memorag.ipynb",
+          "description": "From-scratch memory-augmented RAG: key-value pair extraction, surrogate query generation, multi-query retrieval, and a FAISS-based MemoryStore compared against standard RAG. The summary table files this under a generic 'Advanced' category."
+        }
+      ]
+    },
+    {
+      "name": "Explainability and Transparency",
+      "techniques": [
+        {
+          "name": "Explainable Retrieval",
+          "notebook": "all_rag_techniques/explainable_retrieval.ipynb",
+          "description": "Add transparency to retrieval by explaining why each piece of information was retrieved and how it relates to the query. Runnable script available."
+        }
+      ]
+    },
+    {
+      "name": "Advanced Architectures",
+      "techniques": [
+        {
+          "name": "Agentic RAG with Contextual AI",
+          "notebook": "all_rag_techniques/Agentic_RAG.ipynb",
+          "description": "Production-oriented agentic RAG for financial documents on Contextual AI's managed platform: vision-model document parser, instruction-following reranker, grounded language model (GLM), and LMUnit natural-language unit testing. Sponsor-affiliated content."
+        },
+        {
+          "name": "Graph RAG with Milvus Vector Database",
+          "notebook": "all_rag_techniques/graphrag_with_milvus_vectordb.ipynb",
+          "description": "Graph RAG on Milvus: store text passages and subject-predicate-object relationship triplets in separate collections, do multi-way retrieval over both, LLM-rerank relationships, then fetch final passages. Appears only in the detailed list, not in the summary table. Sponsor-affiliated (Zilliz/Milvus) content."
+        },
+        {
+          "name": "Knowledge Graph Integration (Graph RAG with LangChain)",
+          "notebook": "all_rag_techniques/graph_rag.ipynb",
+          "description": "Retrieve entities and relationships from a knowledge graph relevant to the query and combine that structured data with unstructured text. Runnable script available."
+        },
+        {
+          "name": "Microsoft GraphRAG",
+          "notebook": "all_rag_techniques/Microsoft_GraphRag.ipynb",
+          "description": "Microsoft's open-source GraphRAG: extract entities and relationships from text units and generate bottom-up community summaries to improve LLM performance over a corpus."
+        },
+        {
+          "name": "RAPTOR (Recursive Abstractive Processing for Tree-Organized Retrieval)",
+          "notebook": "all_rag_techniques/raptor.ipynb",
+          "description": "Recursively summarize retrieved documents abstractively and organize the results in a tree structure for hierarchical context. Runnable script available."
+        },
+        {
+          "name": "Self-RAG",
+          "notebook": "all_rag_techniques/self_rag.ipynb",
+          "description": "Dynamic multi-step pipeline combining retrieval and generation: retrieval decision, document retrieval, relevance evaluation, response generation, support assessment, and utility evaluation. Runnable script available."
+        },
+        {
+          "name": "Corrective RAG (CRAG)",
+          "notebook": "all_rag_techniques/crag.ipynb",
+          "description": "Dynamically evaluate and correct the retrieval process: retrieval evaluator, knowledge refinement, web-search query rewriter, and response generator, adapting sourcing strategy by relevance score. Runnable script available."
+        },
+        {
+          "name": "Local Graph RAG with Verifiable Attribution",
+          "notebook": "all_rag_techniques/graph_rag_local_attribution.ipynb",
+          "description": "Privacy-first Graph RAG running fully locally with Ollama and NetworkX: multi-hop graph traversal with sentence-level attribution, every claim traced to its source document, sentence, and graph path."
+        }
+      ]
+    },
+    {
+      "name": "Special Advanced Technique",
+      "techniques": [
+        {
+          "name": "Sophisticated Controllable Agent for Complex RAG Tasks",
+          "notebook": "",
+          "description": "External project (github.com/NirDiamant/Controllable-RAG-Agent), no notebook in this repo: a deterministic-graph-driven autonomous agent doing question anonymization, high-level planning, task breakdown, adaptive retrieval/QA, continuous re-planning, and answer verification."
+        }
+      ]
+    },
+    {
+      "name": "Notebooks present in repo but absent from README",
+      "techniques": [
+        {
+          "name": "Local RAG with HuggingFace and FAISS",
+          "notebook": "all_rag_techniques/local_rag_huggingface_faiss.ipynb",
+          "description": "Not documented anywhere in README.md (no table row or list entry); by filename, a fully local RAG implementation using HuggingFace models and FAISS."
+        },
+        {
+          "name": "Define Evaluation Metrics",
+          "notebook": "evaluation/define_evaluation_metrics.ipynb",
+          "description": "Not documented anywhere in README.md; by filename, a notebook on defining RAG evaluation metrics. The evaluation/ folder also contains evalute_rag.py (note the 'evalute' typo), a shared evaluation helper module that is likewise unmentioned in the README."
+        }
+      ]
+    }
+  ],
+  "license_summary": "Custom non-commercial license ('Custom License Agreement') by Nir Diamant (Licensor), not an OSI license. Section 1.1 grants a worldwide, royalty-free, non-exclusive, non-transferable license to use, reproduce, MODIFY, and DISTRIBUTE the repository content for non-commercial purposes only - so redistributing processed/derived content inside a free (genuinely non-commercial) desktop app is within the grant, provided attribution conditions are met. Section 1.2 conditions every use/distribution on attribution: cite the Licensor's name, link the repository, and indicate if changes were made. Sections 1.3, 2.1 and 4.1 prohibit ANY commercial use: no using the material for commercial purposes, no distributing it as part of any commercial product or service, and no sublicensing for commercial use; all commercial rights are exclusively reserved to the Licensor, and commercial use requires prior written permission (contact: Nir Diamant, nirdiamant21@gmail.com). Section 4.2 forbids implying endorsement by or affiliation with the Licensor. Section 5 allows immediate termination on breach, after which all copies must be destroyed. Section 6 provides the material AS IS with no warranties and no liability. Section 7.2 lets the Licensor modify the terms at any time (continued use = acceptance); governing law/jurisdiction are unfilled placeholders ('[Your Jurisdiction]'). Practical implication for this project: the knowledge-base app must remain free and non-commercial (no sale, ads, paid tiers, or bundling into a commercial offering), must display the required attribution, and should mark derived/processed content as modified.",
+  "redistribution_allowed_noncommercial": true,
+  "attribution_requirements": [
+    "Provide appropriate credit to the Licensor by citing his name: Nir Diamant.",
+    "Include a link to the repository (https://github.com/NirDiamant/RAG_Techniques).",
+    "Indicate if changes were made to the Licensed Material (processed/summarized/derived content counts as changed material and should be labeled as modified).",
+    "Do not imply endorsement by or affiliation with the Licensor (LICENSE section 4.2).",
+    "No commercial use of the material or derivatives without prior written permission from Nir Diamant (nirdiamant21@gmail.com)."
+  ],
+  "pipeline_notes": [
+    "Shared helper module: helper_functions.py at repo root is imported by notebooks and runnable scripts. Key functions: encode_pdf() and encode_from_string() (RecursiveCharacterTextSplitter, defaults chunk_size=1000/chunk_overlap=200, OpenAIEmbeddings -> FAISS), read_pdf_to_string() (PyMuPDF/fitz), retrieve_context_per_question(), bm25_retrieval() (rank_bm25 BM25Okapi), replace_t_with_space(), text_wrap(), show_context(), retry_with_exponential_backoff()/exponential_backoff() for OpenAI RateLimitError, create_question_answer_from_context_chain() with a Pydantic QuestionAnswerFromContext model, and EmbeddingProvider/ModelProvider enums with get_langchain_embedding_provider() (OpenAI/Cohere/Bedrock). Notebooks typically sys.path-append the repo root and expect OPENAI_API_KEY; an ingestion pipeline can treat any 'from helper_functions import' cell as boilerplate shared across techniques.",
+    "Shared sample data in data/: Understanding_Climate_Change.pdf is the default corpus most notebooks encode; also customers-100.csv (CSV RAG), nike_2023_annual_report.txt, q_a.json / q_a_smith.json / q_a_smith_short.json (evaluation Q&A sets), and wealth_retrieved_passages_from_original_memorag.csv (MemoRAG). Notebooks reference these via relative ../data/ paths (with Colab download fallbacks), so path rewriting is needed when executing outside the repo layout.",
+    "Images: images/ holds one Mermaid-exported SVG diagram per technique (e.g. crag.svg, raptor.svg, hype.svg) plus PNG sponsor logos/banners. CONTRIBUTING.md mandates notebooks embed their diagram via markdown '![name](../images/name.svg)', so ingestion should resolve ../images/ relative links; README itself mixes local images/ references with external shields.io badges and colab badge images.",
+    "Tracking pixels and promo content: README.md and CONTRIBUTING.md end with a tracking-image URL (europe-west1-rag-techniques-views-tracker.cloudfunctions.net/rag-techniques-tracker?...), and README technique links are sometimes wrapped through the same tracker. README is also heavily interleaved with promotional material (sponsors, newsletter, book, affiliate links, course CTAs). Strip tracker URLs and promo sections; only the 'Advanced Techniques' summary table and the per-technique list sections carry taxonomy content.",
+    "Notebook naming conventions: 39 notebooks in all_rag_techniques/ plus 5 notebooks and one .py helper in evaluation/. Mostly lowercase snake_case; exceptions Agentic_RAG.ipynb, Microsoft_GraphRag.ipynb, HyDe_Hypothetical_Document_Embedding.ipynb, HyPE_Hypothetical_Prompt_Embeddings.ipynb. Framework variants use the _with_llamaindex suffix (5 files) and should be grouped with their base technique; multi-modal notebooks use the 'multi_model_' (sic) prefix; evaluation helper is evalute_rag.py (sic).",
+    "Runnable-scripts duplication: all_rag_techniques_runnable_scripts/ contains 19 .py files that are converted duplicates of a subset of the notebooks (same basenames, e.g. crag.py, raptor.py, self_rag.py); several import helper_functions. Treat notebooks as canonical and either skip the scripts or index them as alternate representations to avoid near-duplicate chunks.",
+    "README link defects to work around: (a) many GitHub 'View' links in the detailed list are malformed concatenations of a GitHub prefix and a Colab URL ('github.com/NirDiamant/RAG_TECHNIQUES/blob/main/https://colab.research.google.com/...') - resolve techniques by notebook filename, never by scraping these URLs; (b) summary-table row 17 links to all_rag_techniques/multi_faceted_filtering.ipynb, which does not exist; (c) the HyPE list entry links to the non-existent singular HyPE_Hypothetical_Prompt_Embedding.ipynb (actual file has plural 'Embeddings').",
+    "README numbering/taxonomy inconsistencies: the summary table (rows 1-36) and the detailed list use different numbering and sometimes different categories - the list has two entries numbered 6 (JSON RAG and Query Transformations), skips 19 and 24, and restarts numbers across sections (Explainable Retrieval is 25 in the table, 27 in the list); HyPE is 'Query Enhancement' in the table but under 'Context and Content Enrichment' in the list; MemoRAG is 'Advanced' in the table but its own 'Memory-Augmented Retrieval' section in the list. Use notebook filenames as canonical keys and treat the table's Category column plus the list's section headers as two parallel labelings.",
+    "Coverage gaps in both directions: notebooks absent from the README entirely are all_rag_techniques/local_rag_huggingface_faiss.ipynb and evaluation/define_evaluation_metrics.ipynb (plus the evaluation/evalute_rag.py helper); README entries with no notebook in the repo are Multi-faceted Filtering (broken table link, conceptual only) and Sophisticated Controllable Agent (external repo NirDiamant/Controllable-RAG-Agent). Detailed-list-only notebooks not in the table: json_rag.ipynb, graphrag_with_milvus_vectordb.ipynb, multi_model_rag_with_colpali.ipynb, and all *_with_llamaindex variants.",
+    "Other repo facts: tests/ contains only conftest.py and test_imports.py (import smoke tests); the 'Getting Started' section's 'cd all_rag_techniques/technique-name' instruction is inaccurate (notebooks are flat files, not per-technique directories); CONTRIBUTING.md prescribes a consistent notebook structure (title/overview, detailed explanation, Mermaid-SVG diagram, step-by-step implementation, usage example, comparison vs basic RAG, additional considerations, references) that an ingestion pipeline can exploit for section-aware chunking; README claims '42+ runnable notebooks' while the checkout contains 44 .ipynb files (39 + 5)."
+  ],
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/_repo-overview.json"
+}

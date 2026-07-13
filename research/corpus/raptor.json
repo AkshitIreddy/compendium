@@ -1,0 +1,84 @@
+{
+  "slug": "raptor",
+  "title": "RAPTOR: Recursive Abstractive Processing for Tree-Organized Retrieval",
+  "one_liner": "Recursively cluster and summarize chunks into a multi-level summary tree, index every level in one vectorstore, and retrieve top-down so queries can match at the right level of abstraction.",
+  "stage": "indexing",
+  "problem_solved": "Flat top-k chunk retrieval answers narrow factoid questions but fails on broad, thematic, or synthesis questions whose answer is distributed across many chunks or whole documents; RAPTOR adds LLM-generated cluster summaries at multiple abstraction levels so both overview and detail queries have a matching index entry.",
+  "failure_modes": [
+    "Retrieval works for specific facts but fails on broad questions like 'what are the main themes / overall conclusions of this report'",
+    "The answer is scattered across many chunks or sections, and top-k retrieval only surfaces disconnected fragments",
+    "On a large document collection, retrieval either misses important details or gets swamped by irrelevant chunks",
+    "Retrieved chunks lack the document-level or section-level context needed to interpret them correctly",
+    "Questions require multi-hop or thematic reasoning that no single chunk supports",
+    "One index must serve queries at very different granularities (executive summary vs. exact figure lookup)"
+  ],
+  "when_to_use": [
+    "Your corpus is long-form documents (reports, books, documentation, transcripts) where facts depend on surrounding sections and users ask both overview and detail questions",
+    "Users frequently ask 'summarize', 'compare across sections', or 'main takeaways' style questions that a flat chunk index handles poorly",
+    "The corpus is relatively static, so the expensive one-time tree build is amortized over many queries",
+    "You want traceability from high-level answers back to source chunks (the tree stores parent/child and origin metadata per node)",
+    "You already use hierarchical two-level indexing (doc summaries + chunks) and need more abstraction levels"
+  ],
+  "tradeoffs": [
+    "Expensive index build: one LLM summarization call per cluster per level (plus re-embedding each level), so cost and build time scale with corpus size and tree depth",
+    "Corpus updates require rebuilding (or carefully patching) the tree — poor fit for frequently changing document sets",
+    "Summaries can lose or distort fine details; answers grounded in summary nodes are one step removed from verbatim source text",
+    "Index is larger: the vectorstore holds original chunks plus every summary at every level",
+    "Extra hyperparameters and moving parts: cluster count (notebook uses a fixed heuristic n_clusters = min(10, n_texts // 2) rather than the paper's UMAP + GMM with BIC selection), max_levels, per-level summarization prompts",
+    "This notebook's online path adds latency: hierarchical retrieval loops over levels and contextual compression makes an LLM extraction call per retrieved document",
+    "Implementation caveat: the notebook's hierarchical_retrieval narrows to children by appending 'AND id:(...)' text to the embedded query string, which is not a real metadata filter — a production port should filter on child_ids properly (the tree_traversal_retrieval variant does use FAISS callable metadata filters)",
+    "Overkill for small corpora or purely factoid QA where plain top-k similarity search already works"
+  ],
+  "how_it_works": "Offline (indexing, the dominant stage): load a PDF with PyPDFLoader and take page texts as level-0 nodes. build_raptor_tree then loops up to max_levels: embed current texts with OpenAIEmbeddings, cluster the embeddings with a scikit-learn GaussianMixture (n_clusters = min(10, n_texts // 2)), and for each cluster call summarize_texts — a 'Summarize the following text concisely' ChatPromptTemplate piped to ChatOpenAI(gpt-4o-mini). Each summary becomes a node at the next level with metadata {level, origin, child_ids, id}, preserving parent-child links; the loop stops early when only one summary remains. build_vectorstore flattens ALL levels (original chunks + every summary) into LangChain Documents and builds a single FAISS index. Online (retrieval + post-retrieval): hierarchical_retrieval starts at the top level and walks down, retrieving per level and following child_ids; an alternative tree_traversal_retrieval uses similarity_search_by_vector_with_relevance_scores with callable metadata filters on level/id. Retrieved nodes pass through a ContextualCompressionRetriever whose LLMChainExtractor keeps only query-relevant spans, and raptor_query concatenates the compressed docs into context for a final LLMChain answer, returning the answer plus per-document level/origin details for traceability.",
+  "key_dependencies": [
+    "langchain (FAISS vectorstore wrapper, ChatPromptTemplate, LLMChain, ContextualCompressionRetriever, LLMChainExtractor, Document)",
+    "langchain-openai (ChatOpenAI gpt-4o-mini, OpenAIEmbeddings)",
+    "faiss-cpu (vector index)",
+    "scikit-learn (GaussianMixture clustering, PCA for cluster visualization)",
+    "numpy / pandas (per-level DataFrames of text, embedding, cluster, metadata)",
+    "matplotlib (cluster visualization)",
+    "python-dotenv (OPENAI_API_KEY loading)",
+    "repo helper_functions / evaluation.evalute_rag (PyPDFLoader and eval utilities)"
+  ],
+  "key_code_signals": [
+    "GaussianMixture(n_components=n_clusters, random_state=42).fit_predict(embeddings) — GMM clustering of embeddings at each tree level",
+    "build_raptor_tree(texts, max_levels=3) — recursive embed -> cluster -> summarize loop producing per-level DataFrames with {level, origin, child_ids, id} metadata",
+    "summarize_texts(): ChatPromptTemplate('Summarize the following text concisely') | ChatOpenAI(model_name='gpt-4o-mini')",
+    "build_vectorstore(): FAISS.from_documents over Documents from ALL tree levels (originals + summaries) in one index",
+    "tree_traversal_retrieval(): similarity_search_by_vector_with_relevance_scores with lambda metadata filters on level and parent ids, recursing down via child_ids",
+    "hierarchical_retrieval(): loop from max_level down to 0, extending results and following child_ids",
+    "ContextualCompressionRetriever(base_compressor=LLMChainExtractor.from_llm(llm), base_retriever=vectorstore.as_retriever())",
+    "raptor_query(): LLMChain over concatenated compressed context for final answer, returning per-doc level/origin details"
+  ],
+  "related_techniques": [
+    "hierarchical-indices: refines — RAPTOR generalizes two-level (document summary + chunk) indexing into a recursive multi-level summary tree",
+    "contextual-compression: composes — the notebook wraps the tree vectorstore in a ContextualCompressionRetriever with LLMChainExtractor to trim retrieved nodes",
+    "graph-rag: alternative — graph/community-summary architecture targeting the same global, thematic question failure mode",
+    "microsoft-graphrag: alternative — entity/community-based hierarchical summarization instead of embedding-cluster summarization",
+    "semantic-chunking: complements — semantically coherent base chunks improve level-0 cluster quality before tree building",
+    "context-enrichment-window-around-chunk: alternative — cheaper fix when the problem is only local context around a retrieved chunk, not corpus-wide synthesis",
+    "reranking: complements — could reorder mixed-level retrieved nodes before generation"
+  ],
+  "complexity": "high",
+  "keywords": [
+    "raptor",
+    "hierarchical summarization",
+    "recursive summarization",
+    "summary tree",
+    "tree-organized retrieval",
+    "multi-level index",
+    "clustering chunks",
+    "gaussian mixture model",
+    "abstraction levels",
+    "thematic questions",
+    "global questions",
+    "summarize entire document",
+    "long documents",
+    "large document collection",
+    "tree traversal retrieval",
+    "faiss",
+    "contextual compression"
+  ],
+  "summary": "RAPTOR attacks the failure where flat chunk retrieval answers detail questions but fails on broad, thematic, or cross-section questions whose answer is spread across many chunks. At index time it recursively builds a summary tree: embed all chunks (OpenAIEmbeddings), cluster them with a Gaussian Mixture Model (scikit-learn), summarize each cluster with an LLM (gpt-4o-mini via LangChain), then repeat on the summaries for up to max_levels until a single root summary remains. Every node — original chunks and all summaries — is stored with level and parent/child metadata in one FAISS vectorstore, so a query can match at the appropriate abstraction level. Retrieval starts at the top level and walks down through child_ids (hierarchical or tree-traversal retrieval), and retrieved nodes pass through a ContextualCompressionRetriever (LLMChainExtractor) before final answer generation. Costs: O(clusters x levels) LLM summarization calls at build time, a larger index, full rebuilds on corpus changes, and possible detail loss in summaries. Prefer it for long reports and 'main themes' queries over static corpora; skip it for small corpora or purely factoid lookup.",
+  "notes_for_chunking": "Structure is clean and function-per-cell. Cell 0 is a book advertisement (strip). Cell 1 is a long, fully self-contained overview markdown cell with its own ## subsections (Overview, Motivation, Key Components, Method Details, Benefits, Conclusion) — chunk it by subsection; it is the only substantive prose in the notebook. Cell 2 is an image reference (strip or keep as pointer). Cells 3-5 are pip install and git clone boilerplate (strip). Cell 6 is the imports block (useful as dependency signal, low retrieval value). From there the notebook alternates one short ### header markdown cell ('Helper Functions', 'RAPTOR Core Function', 'Vectorstore Function', 'Define tree traversal retrieval', 'Create Retriever', 'Define hierarchical retrieval', 'RAPTOR Query Process (Online Process)') with exactly one code cell defining 1-4 functions — headers are terse labels, so keep header + code cell together as one chunk; the code carries all the content. Code-to-markdown ratio is high after cell 1. Example-usage cells at the end are short one-liners (tree build, vectorstore, query). No large outputs or base64 blobs in this copy; final cell is a tracking-pixel markdown image (strip)."
+}

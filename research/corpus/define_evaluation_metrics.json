@@ -1,0 +1,79 @@
+{
+  "slug": "define_evaluation_metrics",
+  "title": "Custom LLM-as-Judge Evaluation Metrics (Correctness, Faithfulness, Retrieval Relevancy)",
+  "one_liner": "Hand-rolled LLM-as-judge metrics for RAG — answer correctness vs ground truth, faithfulness of the answer to the retrieved context, and a relevancy score over retrieved documents — built from scratch with LangChain PromptTemplates and GPT-4o structured output.",
+  "stage": "evaluation",
+  "problem_solved": "You have a working RAG pipeline but no quantitative way to tell whether generated answers are correct, whether they are actually grounded in the retrieved context (vs. the model's pretrained knowledge), or whether the retriever is returning relevant documents. This notebook shows how to define those three metrics yourself as lightweight LLM-judge chains instead of adopting a full evaluation framework.",
+  "failure_modes": [
+    "Answers look plausible but are hallucinated — generated from the model's pretrained knowledge instead of the retrieved context, and you have no way to detect it",
+    "You can't measure whether answers are actually correct against known ground-truth answers, especially partially-correct answers that exact-match or string-overlap metrics score as wrong",
+    "Irrelevant chunks pollute the context window and you have no metric quantifying what fraction of retrieved documents are actually relevant to the query",
+    "You change a chunking/retrieval/prompting setting and cannot tell if the pipeline got better or worse because there is no scoring harness",
+    "Off-the-shelf eval frameworks (RAGAS, DeepEval) feel opaque or heavyweight and you want transparent, fully controllable judge prompts"
+  ],
+  "when_to_use": [
+    "You are iterating on a RAG pipeline (chunk size, retriever, reranker, prompt) and need repeatable 0-1 scores to A/B compare variants",
+    "You have (or can create) a small labeled set of question/ground-truth pairs — required for the correctness metric",
+    "You suspect hallucination: answers are often right-sounding but you need to verify they are deducible from the retrieved context (faithfulness is deliberately correctness-agnostic — a factually right answer not derivable from context scores 0)",
+    "You want to diagnose whether failures come from retrieval (relevancy metric over retrieved docs) or generation (correctness/faithfulness metrics)",
+    "You need custom judging rubrics you can edit directly (few-shot examples in the prompt) rather than a framework's fixed metric definitions",
+    "You want structured, numeric judge output that never fails parsing, via pydantic-constrained with_structured_output"
+  ],
+  "tradeoffs": [
+    "Every evaluated example costs one extra GPT-4o call per metric — three metrics over a large test set is slow and expensive",
+    "Judge scores are themselves LLM outputs: noisy, prompt-sensitive, and unvalidated; unlike GroUSE-style approaches there is no meta-evaluation of the judge itself",
+    "Correctness requires ground-truth answers, which means building and maintaining a labeled test set",
+    "The relevancy metric averages per-document scores into one number, losing rank position information — use classic IR metrics (MRR/NDCG) if ranking order matters",
+    "The faithfulness prompt's behavior hinges entirely on its few-shot examples; edge cases (e.g. context '6' for 'what is 3+3?') are handled by example, not by principle, so new domains need new examples",
+    "The notebook is a sketch, not a library: it contains latent bugs (the relevancy chain pipes an undefined variable name `ratio_of_relevant_docs_prompt` when the prompt is named `relevancy_score_prompt`; `evaluate_faithfulness` returns `result.explanation` although the explanation field is commented out of the ResultScore model) — it needs cleanup before production use",
+    "Do NOT use this if you want maintained, benchmarked metrics out of the box — prefer DeepEval, RAGAS, GroUSE, or Open-RAG-Eval notebooks in the same repo"
+  ],
+  "how_it_works": "Three independent LLM-judge chains are built with the same pattern: a LangChain PromptTemplate piped into ChatOpenAI(model='gpt-4o', temperature=0) with .with_structured_output(ResultScore), where ResultScore is a pydantic model containing a single float score in [0,1] — guaranteeing parseable numeric output. (1) Correctness: prompt takes question, ground_truth, and generated_answer and asks for a continuous 0-1 score of how correct the answer is relative to ground truth (a half-right answer to 'capitals of France and Spain' scores 0.5). (2) Faithfulness: prompt takes question, context, and generated_answer and asks a strictly binary 0/1 question — can the answer be deduced from the context alone? — with seven few-shot examples explicitly separating faithfulness from correctness (an answer that is wrong but matches the context scores 1; an answer that is right but not derivable from context scores 0). This isolates hallucination/grounding from factual accuracy. (3) Retrieval relevancy: prompt takes the question plus the list of retrieved docs, scores each doc on a 4-level rubric (0 / 0.33 / 0.66 / 1.0), and returns the average — a soft precision measure for the retriever. Each chain is wrapped in a small evaluate_* function and demoed on toy inputs. Although the technique lives at the evaluation stage, the faithfulness metric diagnoses the generation stage and the relevancy metric diagnoses the retrieval stage.",
+  "key_dependencies": [
+    "langchain (PromptTemplate, chains)",
+    "langchain_openai (ChatOpenAI, GPT-4o judge)",
+    "langchain_core.pydantic_v1 (BaseModel, Field for structured scores)",
+    "python-dotenv + OPENAI_API_KEY",
+    "langchain.embeddings.OpenAIEmbeddings, langchain.vectorstores.FAISS, numpy (imported but unused in the actual metric code)"
+  ],
+  "key_code_signals": [
+    "class ResultScore(BaseModel): score: float = Field(..., description='...0 to 1...')",
+    "llm.with_structured_output(ResultScore) — pydantic-constrained judge output",
+    "ChatOpenAI(temperature=0, model_name='gpt-4o', max_tokens=4000)",
+    "correctness_prompt = PromptTemplate(input_variables=['question','ground_truth','generated_answer'], ...)",
+    "faithfulness_prompt with 7 few-shot examples enforcing 'derivable from context' independent of factual correctness",
+    "relevancy_score_prompt with a 0.00/0.33/0.66/1.00 per-document rubric averaged into a final score",
+    "chain pattern: prompt | llm.with_structured_output(ResultScore) then .invoke({...}).score"
+  ],
+  "related_techniques": [
+    "evaluation_deep_eval: alternative — same correctness/faithfulness/contextual-relevancy metrics via the maintained DeepEval framework",
+    "evaluation_grouse: alternative — grounded-QA judge metrics plus meta-evaluation (unit tests) of the judge itself",
+    "end-2-end_rag_evaluation: refines — full evaluation pipeline that combines LLM-as-judge metrics like these with RAGAS",
+    "open-rag-eval-example: alternative — open-source metric suite (UMBRELA scoring, nugget-based, citation/hallucination detection)",
+    "self_rag: related — applies similar LLM-based relevance and support judgments at inference time rather than as offline evaluation",
+    "any retrieval/chunking technique in the repo: composes-with — these metrics are the scoring harness for A/B comparing them"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "rag evaluation",
+    "llm as judge",
+    "faithfulness metric",
+    "groundedness",
+    "hallucination detection",
+    "answer correctness",
+    "ground truth scoring",
+    "context relevance",
+    "retrieval precision",
+    "evaluate retriever",
+    "langchain evaluation",
+    "structured output scoring",
+    "pydantic judge score",
+    "gpt-4o judge",
+    "custom eval metrics",
+    "ragas alternative",
+    "a/b test rag pipeline"
+  ],
+  "summary": "Defines three custom LLM-as-judge metrics for RAG evaluation without any evaluation framework: (1) correctness — GPT-4o compares the generated answer to a ground-truth answer and returns a continuous 0-1 score, handling partially-correct answers that exact-match metrics miss; (2) faithfulness — a binary 0/1 judgment of whether the answer can be deduced from the retrieved context alone, deliberately independent of factual correctness, so it isolates hallucination (answers drawn from pretrained knowledge score 0 even when right); (3) retrieval relevancy — each retrieved document is scored on a 0/0.33/0.66/1.0 rubric and averaged, giving a soft precision measure for the retriever. All three use the same implementation pattern: LangChain PromptTemplate piped into ChatOpenAI(gpt-4o, temperature=0) with with_structured_output on a pydantic ResultScore model, guaranteeing parseable numeric scores. Use it to quantify hallucination, diagnose retrieval-vs-generation failures, and A/B compare pipeline variants when you want transparent, editable judge prompts instead of RAGAS/DeepEval. Costs one judge call per metric per example; correctness needs labeled ground truth; judge scores are unvalidated and prompt-sensitive.",
+  "notes_for_chunking": "14 cells, almost entirely code — there are NO markdown section headers at all. The only markdown cells are junk: cell 0 is a promotional book advertisement and the final cell is a view-tracker image; strip both. Natural chunk boundaries are per-metric triples: (prompt-definition cell, evaluate_* wrapper-function cell with docstring, tiny test cell with a one-line numeric output) for correctness, faithfulness, and relevancy — chunk by metric and keep the prompt template together with its wrapper function, because the long multi-line prompt strings (especially the 7 few-shot faithfulness examples) carry the real semantic content. The shared setup (imports + ChatOpenAI init + ResultScore pydantic model) should be prepended or referenced by every metric chunk since all chains depend on it. Import cell contains unused imports (FAISS, OpenAIEmbeddings, numpy, load_evaluator) — do not infer dependencies from imports alone. Outputs are single-line scores, safe to keep. Beware two latent code bugs (undefined ratio_of_relevant_docs_prompt name; explanation field commented out but returned) — cells reflect stale kernel state, so code is not fully self-consistent.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/define_evaluation_metrics.json"
+}

@@ -1,0 +1,90 @@
+{
+  "slug": "simple_rag_with_llamaindex",
+  "title": "Simple RAG with LlamaIndex (FAISS + OpenAI Embeddings)",
+  "one_liner": "Baseline end-to-end RAG pipeline in LlamaIndex: PDF ingestion, sentence-aware token chunking, OpenAI embeddings in a FAISS flat index, top-k retrieval, and a deepeval LLM-judge evaluation harness.",
+  "stage": "indexing",
+  "problem_solved": "LLMs cannot answer questions about private or domain-specific documents that exceed their context window or were absent from training data. This notebook provides the minimal working pipeline that grounds answers in your own PDFs: encode document chunks into a vector store and retrieve the most semantically similar chunks as context at query time. It is the reference baseline every other technique in the repo builds on or is compared against.",
+  "failure_modes": [
+    "The model hallucinates or says it doesn't know when asked about my own PDFs or internal documents",
+    "My documents are far too long to paste into the LLM's context window",
+    "Answers are not grounded in any source material and I can't trace where they came from",
+    "Keyword search misses passages that use different wording than the query (semantic mismatch)",
+    "I have no working baseline RAG system to measure advanced techniques against",
+    "I have no way to measure whether my RAG answers are correct, faithful, and using relevant context"
+  ],
+  "when_to_use": [
+    "You are starting a new RAG project and need a working, measurable baseline before adding any sophistication",
+    "Your corpus is a modest number of text-centric PDFs (reports, articles, manuals) without heavy tables or figures",
+    "Questions are single-hop and answerable from one or two short passages",
+    "You prefer LlamaIndex abstractions (IngestionPipeline, Settings, TransformComponent) over LangChain — the repo has an equivalent LangChain notebook (simple_rag)",
+    "You want an in-process vector store (FAISS) with no external database or service to run",
+    "You want an evaluation harness (correctness, faithfulness, contextual relevancy via deepeval) wired in from day one"
+  ],
+  "tradeoffs": [
+    "No reranking, query transformation, or context enrichment: retrieval quality is capped by raw embedding similarity, and the notebook's similarity_top_k=2 easily misses the answering chunk",
+    "Fixed 200-token chunks with 50-token overlap can split a fact across chunk boundaries and strip the surrounding context a chunk needs to be understood",
+    "faiss.IndexFlatL2 is exact brute-force search: fine for one PDF, but latency and memory grow linearly; large corpora need ANN indexes or a managed vector DB",
+    "In-memory index with no persistence, metadata filtering, or hybrid keyword search shown",
+    "Per-chunk embedding cost and hard dependency on the OpenAI API (text-embedding-3-small at 512 dims; gpt-4o for evaluation)",
+    "Not suited to multi-hop questions, tabular/structured data, or visually rich documents — this is exactly the baseline that advanced techniques in the repo exist to improve",
+    "Evaluation adds extra gpt-4o judge calls per test case (cost and latency)"
+  ],
+  "how_it_works": "Primarily an indexing recipe, but it spans the whole pipeline (chunking, retrieval, generation, evaluation). (1) SimpleDirectoryReader loads all PDFs from a directory. (2) A custom TextCleaner(TransformComponent) normalizes tabs and paragraph-break artifacts from PDF extraction. (3) SentenceSplitter chunks text into nodes of CHUNK_SIZE=200 tokens with CHUNK_OVERLAP=50 — the notebook explicitly notes LlamaIndex counts tokens where LangChain counts characters. (4) An IngestionPipeline composes [TextCleaner, SentenceSplitter] and writes results into a FaissVectorStore backed by faiss.IndexFlatL2 (512-dim); Settings.embed_model is OpenAIEmbedding(model='text-embedding-3-small', dimensions=512). (5) VectorStoreIndex(nodes).as_retriever(similarity_top_k=2) returns the two nearest chunks for a query; as_query_engine additionally generates an answer from them. (6) evaluate_rag() loads a ground-truth q_a.json, runs the query engine, and scores results with deepeval metrics — GEval correctness, FaithfulnessMetric, ContextualRelevancyMetric — all judged by gpt-4o.",
+  "key_dependencies": [
+    "llama-index (core: SimpleDirectoryReader, VectorStoreIndex, IngestionPipeline, SentenceSplitter, Settings, TransformComponent)",
+    "llama-index-vector-stores-faiss (FaissVectorStore)",
+    "llama-index-embeddings-openai (OpenAIEmbedding)",
+    "faiss-cpu",
+    "OpenAI API (text-embedding-3-small embeddings; gpt-4o as evaluation judge)",
+    "deepeval (GEval, FaithfulnessMetric, ContextualRelevancyMetric)",
+    "python-dotenv",
+    "repo helper: evaluation.evalute_rag.create_deep_eval_test_cases"
+  ],
+  "key_code_signals": [
+    "Settings.embed_model = OpenAIEmbedding(model=\"text-embedding-3-small\", dimensions=512)",
+    "faiss_index = faiss.IndexFlatL2(EMBED_DIMENSION); vector_store = FaissVectorStore(faiss_index=faiss_index)",
+    "class TextCleaner(TransformComponent): ... node.text.replace('\\t', ' ')",
+    "SentenceSplitter(chunk_size=200, chunk_overlap=50)",
+    "IngestionPipeline(transformations=[TextCleaner(), text_splitter], vector_store=vector_store)",
+    "vector_store_index = VectorStoreIndex(nodes); retriever = vector_store_index.as_retriever(similarity_top_k=2)",
+    "query_engine = vector_store_index.as_query_engine(similarity_top_k=2)",
+    "evaluate(test_cases=..., metrics=[correctness_metric, faithfulness_metric, relevance_metric])"
+  ],
+  "related_techniques": [
+    "simple_rag: alternative — the same baseline implemented in LangChain instead of LlamaIndex",
+    "choose_chunk_size: refines — tunes the chunk_size/overlap parameters this baseline hardcodes",
+    "semantic_chunking: refines — replaces fixed-size splitting with meaning-based boundaries",
+    "context_enrichment_window_around_chunk: extends — fixes retrieved chunks that lack surrounding context",
+    "query_transformations: composes-with — rewrites/expands queries before hitting this retriever",
+    "HyDe_Hypothetical_Document_Embedding: composes-with — embeds a hypothetical answer to bridge query/corpus vocabulary",
+    "reranking: extends — re-scores a larger candidate set to beat raw top-k similarity",
+    "reliable_rag: extends — adds relevance and grounding checks on top of this baseline",
+    "prerequisite-of: nearly every advanced technique in the repo assumes this vector-index baseline"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "simple rag",
+    "basic rag",
+    "baseline rag",
+    "llamaindex",
+    "faiss",
+    "vector store",
+    "semantic search",
+    "pdf question answering",
+    "ingestion pipeline",
+    "sentence splitter",
+    "chunking",
+    "chunk overlap",
+    "openai embeddings",
+    "text-embedding-3-small",
+    "top-k retrieval",
+    "query engine",
+    "rag evaluation",
+    "deepeval",
+    "faithfulness",
+    "contextual relevancy"
+  ],
+  "summary": "Reference baseline RAG pipeline built on LlamaIndex, for grounding LLM answers in your own PDFs when the model hallucinates about private documents or the corpus exceeds the context window. SimpleDirectoryReader loads PDFs; an IngestionPipeline applies a custom TextCleaner (strips tab/newline artifacts from PDF extraction) and a SentenceSplitter producing 200-token chunks with 50-token overlap (token counts, unlike LangChain's character counts); OpenAI text-embedding-3-small vectors (512 dims) land in an in-process FAISS IndexFlatL2 store. VectorStoreIndex.as_retriever(similarity_top_k=2) fetches the nearest chunks; as_query_engine generates answers; deepeval scores correctness (GEval), faithfulness, and contextual relevancy with gpt-4o against a ground-truth Q&A file. Use it as the starting point and measurement baseline for any RAG project with text-centric documents and single-hop questions. Its weaknesses define the rest of the repo: fixed chunks split facts and lose surrounding context, raw top-2 similarity misses answers without reranking or query transformation, brute-force FAISS doesn't scale, and there's no support for tables, figures, or multi-hop reasoning.",
+  "notes_for_chunking": "Well-structured, small notebook (~26 cells) with a high markdown-to-code ratio. Cell 0 is a promotional book ad — always strip. Cell 1 is a long, fully self-contained overview markdown (Overview / Key Components / Method Details / Benefits / Conclusion with ## and ### headers) — excellent standalone chunk, but note its claims are slightly vaguer than the code (e.g. 'top 2 chunks' is stated, metrics are 'not detailed' though code shows them). The body alternates one short ### header markdown cell with one short code cell per pipeline stage (Read Docs, Vector Store, Text Cleaner Transformation, Ingestion Pipeline, Create retriever, Test retriever, Evaluate results) — header+code pairs make natural atomic chunks. Junk to strip: pip install cell, git clone/sys.path cell, wget data-download cell, and the final tracker-pixel image markdown cell. One moderate-size retrieved-context output after the test-query cell is worth keeping as a concrete retrieval example; no giant outputs or base64 blobs. The imports/config cell doubles as documentation (comments explain token-vs-character chunk sizing) and is worth retaining.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/simple_rag_with_llamaindex.json"
+}

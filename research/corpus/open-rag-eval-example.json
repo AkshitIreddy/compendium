@@ -1,0 +1,86 @@
+{
+  "slug": "open-rag-eval-example",
+  "title": "Open-RAG-Eval: Reference-Free RAG Evaluation (UMBRELA, AutoNuggetizer, Hallucination, Citation)",
+  "one_liner": "Score a RAG pipeline's retrieval relevance, answer completeness, factual consistency, and citation accuracy without golden answers, using Vectara's open-rag-eval TREC-style evaluator with an LLM judge.",
+  "stage": "evaluation",
+  "problem_solved": "Teams cannot tell whether their RAG system is actually good, or which of two configurations is better, because building golden question-answer datasets is slow and expensive. Open-RAG-Eval evaluates RAG outputs reference-free: it needs only the queries, the retrieved passages, and the generated answers, then applies research-backed automated metrics (UMBRELA per-passage relevance grading, AutoNuggetizer answer-completeness scoring, HHEM-based hallucination detection, and citation precision/recall/F1) to quantify retrieval and generation quality at scale.",
+  "failure_modes": [
+    "I have no ground-truth answers, so I can't measure whether my RAG system works",
+    "I changed my chunking/retriever/prompt and can't tell if the new configuration is better or worse",
+    "My retriever returns passages but I don't know which ones are actually relevant to the query",
+    "Answers sound plausible but may be hallucinated relative to the retrieved passages",
+    "The LLM cites source [1] for a claim but I don't know if that passage really supports it",
+    "Generated answers may be missing key facts that were present in the retrieved passages",
+    "Manual spot-checking of RAG outputs doesn't scale and isn't reproducible"
+  ],
+  "when_to_use": [
+    "You need to compare two or more RAG configurations (chunk size, retriever, reranker, prompt, model) and have no labeled dataset",
+    "You can export your pipeline's per-query outputs (query, retrieved chunks, generated answer) to a CSV or connect via a supported connector (e.g. Vectara)",
+    "Your generated answers include inline citations like [1], [2] and you want to verify citation faithfulness",
+    "You want separate diagnostics for retrieval quality (UMBRELA per-passage 0-3 relevance) versus generation quality (nugget coverage, hallucination, citations), so you know which stage to fix",
+    "You want a repeatable regression-test harness for RAG quality as part of CI or periodic benchmarking",
+    "You need per-query, per-passage intermediate scores for debugging, not just one aggregate number"
+  ],
+  "tradeoffs": [
+    "Requires an LLM judge (GPT-4o-mini in the notebook), so each evaluated query costs several judge calls; large eval sets incur real API cost and time (~5s/query observed for 10 queries)",
+    "Reference-free metrics are proxies: UMBRELA and AutoNuggetizer labels come from an LLM judge and inherit its biases and instability; they measure consistency with retrieved passages, not real-world correctness",
+    "Hallucination scoring downloads and runs Vectara's HHEM model locally (transformers-based), adding a dependency and a 512-token limit warning on long passages",
+    "Evaluation data must be shaped into the framework's expected format: one row per retrieved passage, per-query generated_answer, passage_ids matching citation markers; adapting a custom pipeline requires writing a connector or CSV exporter",
+    "Not a fit if you already have golden answers and want exact-match/semantic-similarity scoring against references; classic reference-based eval (e.g. RAGAS-style with ground truth, DeepEval) may be more direct",
+    "The citation metric only helps if your generation step actually emits structured citations",
+    "This notebook evaluates offline pre-collected outputs; it does not build or run a RAG pipeline itself"
+  ],
+  "how_it_works": "The notebook demonstrates Vectara's open-rag-eval framework on pre-computed RAG outputs for the FiQA (financial Q&A) subset of the BEIR benchmark. RAG outputs are stored in a CSV with one row per retrieved passage (columns: query_id, query, passage_id, passage, generated_answer, where the answer appears on the first row of each query group). A CSVConnector.fetch_data() loads these into RAG result objects. A TRECEvaluator is constructed with an OpenAIModel judge (gpt-4o-mini) and evaluator.evaluate_batch(rag_results) scores every query. Four metric families are attached to each scored result: (1) UMBRELA assigns each retrieved passage a relevance grade 0-3 (NO_RELEVANCE / RELATED / PARTIAL_ANSWER / EXACT_ANSWER) against the query — a retrieval-quality metric; (2) AutoNuggetizer extracts atomic information 'nuggets' a good answer should contain from the passages, labels each vital/okay, then checks whether the generated answer supports / partially supports / does not support each nugget — an answer-completeness metric; (3) a Hallucination score in [0,1] from Vectara's HHEM model measures factual consistency of the answer with the retrieved passages (threshold ~0.5); (4) a Citation metric checks whether each cited passage actually supports the sentence citing it, aggregated into weighted precision/recall/F1. Results are saved via eval_scores.to_csv and summarized with TRECEvaluator.plot_metrics into a comparison chart (multiple result CSVs can be overlaid to compare configurations). Although evaluation is the stage, its metrics diagnose both the retrieval and generation stages separately.",
+  "key_dependencies": [
+    "open-rag-eval (Vectara): TRECEvaluator, OpenAIModel judge, CSVConnector, eval_scores",
+    "OpenAI API (gpt-4o-mini as LLM judge)",
+    "Vectara HHEM model (loaded internally via transformers for hallucination scoring)",
+    "pandas (loading/inspecting the RAG-output CSV)",
+    "python-dotenv (API key loading)",
+    "matplotlib (displaying the metrics summary plot)"
+  ],
+  "key_code_signals": [
+    "from open_rag_eval.evaluators import TRECEvaluator",
+    "from open_rag_eval.models.llm_judges import OpenAIModel",
+    "from open_rag_eval.connectors import CSVConnector",
+    "from open_rag_eval.data_classes import eval_scores",
+    "evaluator = TRECEvaluator(model=judge_model); scored_results = evaluator.evaluate_batch(rag_results)",
+    "scores.retrieval_score.scores['umbrela_scores'] (per-passage 0-3 relevance)",
+    "scores.generation_score.scores['autonugget_scores' | 'hallucination_scores' | 'citation_scores']",
+    "eval_scores.to_csv(...); TRECEvaluator.plot_metrics(csv_files=[...], output_file='metrics_summary.png')"
+  ],
+  "related_techniques": [
+    "end-2-end_rag_evaluation: alternative (custom completeness/relevance/hallucination metrics vs this packaged framework)",
+    "deep_evaluation / DeepEval-based evaluation: alternative reference-based evaluation approach",
+    "simple_rag: prerequisite (you need a working RAG pipeline producing query/passages/answer triples to evaluate)",
+    "reranking: downstream beneficiary (UMBRELA per-passage scores reveal whether reranking is needed and whether it helped)",
+    "graph_rag_local_attribution: complements (citation metric here verifies attribution quality that attribution-focused pipelines produce)",
+    "self_rag / crag: complements (evaluation identifies retrieval/grounding failures these corrective architectures try to fix at runtime)"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "RAG evaluation",
+    "open-rag-eval",
+    "Vectara",
+    "no golden answers",
+    "reference-free evaluation",
+    "UMBRELA",
+    "AutoNuggetizer",
+    "nugget-based evaluation",
+    "hallucination detection",
+    "HHEM",
+    "citation accuracy",
+    "citation F1",
+    "LLM as judge",
+    "TREC RAG",
+    "BEIR",
+    "FiQA",
+    "retrieval relevance scoring",
+    "compare RAG configurations",
+    "RAG benchmarking",
+    "answer completeness"
+  ],
+  "summary": "Demonstrates Vectara's open-rag-eval framework for evaluating RAG systems without golden reference answers. The input is a CSV of pre-collected pipeline outputs (query, retrieved passages one-per-row, generated answer with citations) from the FiQA/BEIR financial Q&A dataset, loaded through a CSVConnector. A TRECEvaluator driven by an LLM judge (GPT-4o-mini) runs evaluate_batch and attaches four metric families per query: UMBRELA grades each retrieved passage 0-3 for relevance to the query (diagnoses retrieval failures); AutoNuggetizer extracts vital/okay information nuggets from passages and checks whether the generated answer supports them (diagnoses incomplete answers); a HHEM-based hallucination score in [0,1] measures whether the answer is factually consistent with the retrieved passages; and a citation metric computes precision/recall/F1 of whether cited passages actually support the citing sentences. Results export to CSV and plot_metrics overlays multiple runs for A/B comparison of RAG configurations. Use it to regression-test or compare chunking/retrieval/generation choices when building labeled eval sets is impractical; costs are judge-LLM API calls and format adaptation of your pipeline outputs.",
+  "notes_for_chunking": "Well-structured, small notebook (~19 cells) with clean markdown headers that map one-to-one onto metric families: Overview, RAG Evaluation outputs, Run an Open-RAG-Eval Evaluation, Review Evaluation Results (with H3 subsections UMBRELA Metric, AutoNuggetizer Metric, Hallucination Metric, Citation Metric), Plotting results. Markdown/code ratio is high (~50/50) and each H3 metric section is self-contained (explanation cell + inspection code cell + printed output), making header-based section chunks natural. No pip-install cells to strip. Junk to strip: long pretty-printed passage/answer outputs in the UMBRELA and AutoNuggetizer cells (hundreds of lines of FiQA passage text), tqdm progress-bar output, HHEM tokenizer warnings, and a base64 PNG output in the final matplotlib display cell. Caveat for extraction: the AutoNuggetizer output cell shows nuggets about an unrelated query because the code reads scores from scored_results[0] while iterating to find a different query — do not treat that printed output as a faithful example of the metric. The Overview cell carries most of the intent/context and should anchor any summary chunk.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/open-rag-eval-example.json"
+}

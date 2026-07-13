@@ -1,0 +1,74 @@
+{
+  "slug": "contextual_compression",
+  "title": "Contextual Compression (LLM-based Post-Retrieval Chunk Extraction)",
+  "one_liner": "After retrieval, an LLM compressor extracts only the query-relevant sentences from each retrieved chunk before the chunks reach the answering model.",
+  "stage": "post-retrieval",
+  "problem_solved": "Retrieved chunks are fixed-size slices of documents and usually contain a lot of text that has nothing to do with the query; passing them verbatim wastes context-window tokens, dilutes the signal the generator sees, and can pull the answer off-topic. Contextual compression inserts an LLM step between the retriever and the QA chain that rewrites each retrieved chunk down to only the parts relevant to the specific query (dropping chunks entirely when nothing is relevant).",
+  "failure_modes": [
+    "Retrieved chunks are mostly irrelevant text with only one or two useful sentences, so the answer model gets distracted or answers off-topic",
+    "Irrelevant chunks pollute the context window and push out genuinely useful content",
+    "Context window budget is exceeded when passing top-k full chunks to the generator",
+    "Answers cite or lean on unrelated material that happened to sit in the same chunk as the relevant fact",
+    "Fixed-size chunking mixes multiple topics in one chunk, so vector similarity retrieves the chunk but the generator can't tell which part mattered"
+  ],
+  "when_to_use": [
+    "Your chunks are large or coarse (e.g., whole pages or 1000+ token slices) and only fragments of each are relevant to typical queries",
+    "You want to raise top-k (retrieve more candidates) without blowing the generator's context budget, because compression shrinks each candidate",
+    "Your generator is expensive or has a small context window, so trimming retrieved text before generation saves cost per answer",
+    "Answers are getting derailed by off-topic sentences inside otherwise-relevant chunks",
+    "You cannot re-chunk or re-index the corpus (compression is purely query-time and works on top of any existing retriever)"
+  ],
+  "tradeoffs": [
+    "Adds one LLM call per retrieved chunk per query, multiplying query-time cost and latency roughly by top-k",
+    "The compressor LLM can drop relevant details or paraphrase incorrectly; extraction quality is bounded by the compressor model",
+    "Latency-sensitive applications may be better served by a cheap cross-encoder reranker or embeddings-based filter, which cut irrelevant chunks without generative rewriting",
+    "Does nothing to improve recall — if the base retriever misses the right chunk, compression cannot recover it",
+    "Redundant when chunks are already small, focused, and well-aligned to queries (compression would just re-emit them at extra cost)",
+    "Compressed text loses surrounding context, which can hurt if the generator needs neighboring sentences for grounding or citation"
+  ],
+  "how_it_works": "A PDF is encoded into a FAISS vector store with the repo's encode_pdf helper (RecursiveCharacterTextSplitter + OpenAI embeddings), and vector_store.as_retriever() provides the base retriever. An LLM compressor is built with LLMChainExtractor.from_llm(ChatOpenAI(model_name='gpt-4o-mini', temperature=0, max_tokens=4000)); LLMChainExtractor prompts the LLM to extract only the parts of each document relevant to the query. The base retriever and compressor are combined via ContextualCompressionRetriever(base_compressor=..., base_retriever=...): at query time it first fetches documents with the base retriever, then runs the extractor over each one, returning trimmed documents (and dropping ones with no relevant content). Finally RetrievalQA.from_chain_type(llm=..., retriever=compression_retriever, return_source_documents=True) wires the compressed retriever into a standard QA chain, so generation sees only the distilled, query-relevant text. The technique operates purely at the post-retrieval stage; indexing and generation are stock components.",
+  "key_dependencies": [
+    "langchain (ContextualCompressionRetriever, LLMChainExtractor, RetrievalQA)",
+    "langchain_openai / ChatOpenAI (gpt-4o-mini as compressor and answer LLM)",
+    "OpenAI API (embeddings + chat, via OPENAI_API_KEY)",
+    "FAISS vector store (via repo helper_functions.encode_pdf)",
+    "python-dotenv",
+    "PyPDF loader (inside encode_pdf helper)"
+  ],
+  "key_code_signals": [
+    "from langchain.retrievers.document_compressors import LLMChainExtractor",
+    "from langchain.retrievers import ContextualCompressionRetriever",
+    "compressor = LLMChainExtractor.from_llm(llm)",
+    "ContextualCompressionRetriever(base_compressor=compressor, base_retriever=retriever)",
+    "llm = ChatOpenAI(temperature=0, model_name='gpt-4o-mini', max_tokens=4000)",
+    "RetrievalQA.from_chain_type(llm=llm, retriever=compression_retriever, return_source_documents=True)",
+    "vector_store = encode_pdf(path)"
+  ],
+  "related_techniques": [
+    "reranking: alternative — reorders/filters whole chunks with a scorer instead of rewriting their content; cheaper per query",
+    "relevant_segment_extraction: alternative — identifies relevant multi-chunk segments without an LLM rewrite step",
+    "context_enrichment_window_around_chunk: complementary-opposite — expands chunks with neighbors, whereas compression shrinks them; can be chained (expand then compress)",
+    "semantic_chunking: alternative/upstream — better chunk boundaries at index time reduce the need for query-time compression",
+    "choose_chunk_size: upstream — tuning chunk size at indexing addresses the same bloat problem before it happens",
+    "simple_rag: prerequisite — contextual compression wraps a basic vector-store retriever like the one built there",
+    "hierarchical_indices: alternative — narrows context via summary-level retrieval rather than post-hoc extraction"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "contextual compression",
+    "LLMChainExtractor",
+    "ContextualCompressionRetriever",
+    "compress retrieved chunks",
+    "filter irrelevant context",
+    "reduce context window usage",
+    "post-retrieval filtering",
+    "extract relevant sentences from chunks",
+    "context distillation",
+    "shrink RAG context",
+    "langchain document compressor",
+    "noisy retrieved chunks",
+    "token cost reduction RAG"
+  ],
+  "summary": "Contextual compression fixes the problem of noisy retrieval: vector search returns fixed-size chunks in which only a fraction of the text is actually relevant to the query, so the generator's context window fills with distracting, off-topic material. The technique inserts an LLM extraction step between retrieval and generation. In this notebook, a PDF is embedded into a FAISS vector store, the base retriever is wrapped with LangChain's ContextualCompressionRetriever using an LLMChainExtractor backed by gpt-4o-mini: for each retrieved chunk, the LLM extracts only the passages relevant to the specific query and discards the rest (dropping fully irrelevant chunks). The compressed retriever plugs directly into a RetrievalQA chain. It is a purely query-time, index-agnostic fix — no re-chunking or re-indexing needed — and helps when chunks are coarse, context budgets are tight, or answers drift onto co-located irrelevant text. Cost: one extra LLM call per retrieved chunk per query, added latency, and risk of the compressor dropping needed details. It improves precision of context, not retrieval recall; a cross-encoder reranker is the cheaper alternative when whole-chunk filtering suffices.",
+  "notes_for_chunking": "Very small, clean notebook (~17 cells). Cell 0 is a book advertisement (junk, strip). Cell 1 is a single dense markdown overview covering Overview/Motivation/Key Components/Method Details/Benefits/Conclusion under one H1 — it is the bulk of the prose and is self-contained; could be split by its H2/H3 subheaders. Cell 2 is an image reference (SVG diagram, strip or keep as pointer). Cells 3-9 are boilerplate: pip install, git clone, imports (including wildcard 'from helper_functions import *' which hides the encode_pdf implementation — the real indexing logic lives in helper_functions.py, not this notebook), and duplicated wget download commands (junk). The technique's entire implementation is one code cell (cell 13, ~15 lines) plus a one-line vector-store creation (cell 11); markdown headers before code cells are terse but accurate ('Create a retriever + contexual compressor + combine them' — note the typo 'contexual'). Cell 15 contains a long example output with full source-document dumps (truncate). Final cell is a tracking-pixel markdown image (strip). High markdown-to-code ratio; ideal chunking is overview-markdown as one chunk and the core code cell with its header as another."
+}

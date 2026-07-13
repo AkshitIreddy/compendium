@@ -1,0 +1,78 @@
+{
+  "slug": "self_rag",
+  "title": "Self-RAG: Self-Reflective Retrieval-Augmented Generation",
+  "one_liner": "An LLM-orchestrated control loop that decides whether to retrieve at all, filters retrieved chunks for relevance, then generates candidate answers and self-grades them for context support and utility before returning the best one.",
+  "stage": "orchestration",
+  "problem_solved": "Standard RAG pipelines retrieve unconditionally and stuff top-k chunks into the prompt, so they waste retrieval on queries the model can answer directly, let irrelevant chunks pollute generation, force answers from an off-topic corpus for out-of-domain questions, and give no signal about whether the final answer is actually grounded in the retrieved context. Self-RAG wraps retrieval and generation in explicit LLM self-evaluation steps (retrieve? relevant? supported? useful?) to fix all four.",
+  "failure_modes": [
+    "My RAG answers sound plausible but are not actually supported by the retrieved documents (hallucination despite retrieval)",
+    "Irrelevant or marginal chunks from top-k retrieval pollute the context window and degrade answer quality",
+    "The system retrieves for every query, even chit-chat or general-knowledge questions where retrieval adds noise and cost",
+    "Out-of-domain questions get forced answers stitched from an unrelated corpus instead of a graceful direct response",
+    "I have no per-answer signal telling me whether a response is grounded in context or how useful it is, so I can't audit or gate outputs"
+  ],
+  "when_to_use": [
+    "Your query stream mixes in-domain questions (answerable from the corpus) with out-of-domain or conversational questions, and unconditional retrieval hurts the latter",
+    "Groundedness matters more than latency: high-stakes QA, batch/offline pipelines, or anywhere a wrong-but-confident answer is expensive",
+    "Naive top-k similarity search regularly returns marginal chunks and you want an LLM relevance gate instead of (or on top of) a reranker",
+    "You want explicit machine-readable quality labels per answer ('fully supported' / 'partially supported' / 'no support', utility 1-5) to drive routing, escalation, or human review",
+    "You cannot fine-tune a model (the original Self-RAG paper trains reflection tokens) but can afford extra inference calls to approximate the behavior with prompts"
+  ],
+  "tradeoffs": [
+    "Heavy LLM-call multiplier: per query it costs 1 retrieval-decision call + k relevance calls + up to k generation calls + k support calls + k utility calls (up to 3k+1 extra calls at top_k=3) — high latency and token spend, so avoid for real-time chat",
+    "Generates one candidate answer per relevant chunk in isolation rather than synthesizing across all relevant contexts, so questions needing facts combined from multiple chunks (multi-hop) can lose information",
+    "End-to-end quality hinges on the reliability of simple binary/scalar LLM judge prompts; a miscalibrated 'No' on the retrieval decision silently skips the corpus entirely",
+    "This notebook is a prompt-based approximation of the Self-RAG paper (which fine-tunes a model to emit reflection tokens); expect weaker, noisier judgments than the trained version",
+    "Overkill when all queries are in-domain and retrieval is already clean — a cheap reranker or relevance filter delivers most of the benefit at a fraction of the cost",
+    "String-matching on judge outputs ('yes', 'relevant', 'fully supported') is brittle; structured output helps but parsing/casing bugs can silently reroute the flow"
+  ],
+  "how_it_works": "Primarily an orchestration/architecture technique that spans query-transformation, retrieval, post-retrieval filtering, and generation. A PDF is chunked (1000 chars, 200 overlap via the repo's encode_pdf helper) and embedded with OpenAIEmbeddings into a FAISS store. At query time, five LangChain chains — each a PromptTemplate piped into ChatOpenAI(gpt-4o-mini).with_structured_output(PydanticModel) — implement the loop: (1) retrieval_chain answers Yes/No on whether retrieval is needed; if No, the model answers directly with no context. (2) If Yes, FAISS similarity_search fetches top-k=3 chunks. (3) relevance_chain labels each chunk Relevant/Irrelevant; irrelevant chunks are dropped, and if none survive the model answers without retrieval. (4) generation_chain produces one candidate answer per relevant chunk. (5) support_chain grades each answer against its chunk as Fully/Partially/No support, and utility_chain scores it 1-5. Finally max(responses, key=(support=='fully supported', utility)) selects the winner. Two demo queries show the branches: an on-topic climate question exercises the full loop; a Harry Potter question demonstrates relevance filtering / no-retrieval fallback.",
+  "key_dependencies": [
+    "langchain (PromptTemplate, chain composition via |)",
+    "langchain-openai (ChatOpenAI gpt-4o-mini, OpenAIEmbeddings)",
+    "langchain_core.pydantic_v1 (BaseModel/Field for structured judge outputs)",
+    "FAISS via langchain_community (built in repo helper_functions.encode_pdf)",
+    "python-dotenv (OPENAI_API_KEY loading)",
+    "repo helper_functions.py and evaluation/evalute_rag.py (PDF loading, chunking, vector store construction)"
+  ],
+  "key_code_signals": [
+    "five PromptTemplate + llm.with_structured_output(PydanticModel) chains: retrieval_chain, relevance_chain, generation_chain, support_chain, utility_chain",
+    "class RetrievalResponse(BaseModel) with 'Output only Yes or No' — the retrieve-or-not gate",
+    "def self_rag(query, vectorstore, top_k=3) — single function encoding the whole decision flow with if/else branches",
+    "vectorstore.similarity_search(query, k=top_k) only executed when retrieval_decision == 'yes'",
+    "per-chunk loop: relevance filter -> generate per relevant context -> support + utility grading",
+    "best_response = max(responses, key=lambda x: (x[1] == 'fully supported', x[2])) — support-then-utility answer selection",
+    "vectorstore = encode_pdf(path) — FAISS + OpenAIEmbeddings from repo helpers"
+  ],
+  "related_techniques": [
+    "crag: alternative — Corrective RAG also self-grades retrieval but falls back to web search on low relevance instead of answering without context",
+    "adaptive_retrieval: refines the same idea — classifies query type to pick a retrieval strategy, whereas Self-RAG gates retrieval on/off and grades outputs",
+    "relevant_segment_extraction / contextual_compression: alternative post-retrieval filters — cheaper ways to remove irrelevant content without full answer self-grading",
+    "reranking: alternative/complement — a reranker can replace or precede the per-chunk LLM relevance judgments at lower cost",
+    "retrieval_with_feedback_loop: related — both use feedback signals on retrieval quality, Self-RAG applies them inline per query",
+    "simple_rag: prerequisite baseline — Self-RAG wraps the same FAISS + embeddings pipeline in a self-evaluation control loop",
+    "explainable_retrieval: complementary — both produce inspectable justifications; Self-RAG's support/utility labels can gate or audit answers"
+  ],
+  "complexity": "medium",
+  "keywords": [
+    "self-rag",
+    "self-reflective RAG",
+    "adaptive retrieval decision",
+    "should I retrieve",
+    "retrieval gating",
+    "relevance filtering with LLM",
+    "hallucination reduction",
+    "groundedness check",
+    "answer support verification",
+    "LLM-as-judge",
+    "utility scoring",
+    "response selection",
+    "reflection tokens",
+    "corrective generation",
+    "agentic RAG loop",
+    "out-of-domain queries"
+  ],
+  "summary": "Self-RAG addresses two chronic RAG failures: retrieving when retrieval only adds noise, and generating answers that are not actually supported by the retrieved context. Instead of the fixed retrieve-then-generate pipeline, an LLM (gpt-4o-mini via LangChain structured-output chains) makes explicit decisions at each stage: first a Yes/No judgment on whether the query needs retrieval at all; if yes, top-k FAISS chunks are each labeled Relevant/Irrelevant and irrelevant ones dropped; a candidate answer is generated per surviving chunk; each candidate is then graded for support against its context (fully/partially/no support) and for utility (1-5), and the best-supported, highest-utility answer wins. Out-of-domain queries fall through to direct generation instead of being forced onto an unrelated corpus. The cost is steep — up to 3k+1 extra LLM calls per query at top_k=3 — and per-chunk generation cannot synthesize across chunks, so multi-hop questions suffer. Use it when groundedness and auditability (explicit support labels) outweigh latency; skip it for real-time chat or uniformly in-domain corpora where a reranker suffices.",
+  "notes_for_chunking": "Well-structured, small notebook (23 cells). Cell 0 is a book advertisement — strip. Cell 1 is a long, high-quality markdown overview with clean ## headers (Overview, Motivation, Key Components, Method Details, Benefits, Conclusion) that maps 1:1 to the code and is ideal standalone chunk material. Cell 2 is an SVG image reference — strip. Cells 3-8 are boilerplate: pip install, git clone + sys.path hack, wildcard helper imports, wget data download (note a duplicated wget line) — strip or compress. The real implementation lives in exactly two cells: cell 15 (five Pydantic models + prompts + chains, ~60 lines) and cell 17 (the self_rag() control-flow function, ~60 lines); keep each intact as a single chunk since splitting mid-function destroys the branch logic. Markdown section headers (### Defining prompt templates, ### Defining the self RAG logic flow) are accurate and usable as chunk titles. Cells 18-21 are two short demo queries with print-heavy expected behavior; low value, safe to summarize. Final cell is a tracking pixel — strip. Markdown:code ratio is roughly 40:60 by cell count but the single cell-1 markdown block carries nearly all conceptual content.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/self_rag.json"
+}

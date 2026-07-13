@@ -1,0 +1,85 @@
+{
+  "slug": "graph_rag_local_attribution",
+  "title": "Local Graph RAG with Verifiable Attribution",
+  "one_liner": "Build a knowledge graph locally with Ollama, answer multi-hop questions by combining vector entry-point search with graph traversal, and cite every claim back to its exact source sentence and graph path.",
+  "stage": "retrieval",
+  "problem_solved": "Vector RAG retrieves chunks that look similar to the query but cannot connect facts scattered across documents, and its attribution stops at the chunk level. This technique builds an LLM-extracted knowledge graph (entities + typed relationships, each carrying the exact source sentence it came from), retrieves via vector search to find entry-point entities and then multi-hop BFS traversal to reach connected facts, and generates answers whose inline [N] citations map to source document, source sentence, and the graph path traversed. It runs entirely on local models (Ollama llama3.1 + sentence-transformers), so no data leaves the machine.",
+  "failure_modes": [
+    "Questions that require connecting facts from multiple documents (multi-hop) return wrong or incomplete answers because vector search retrieves each fact's chunk independently and misses the link between them",
+    "I can't tell which exact sentence in my corpus supports a claim in the generated answer; chunk-level citations are too coarse to verify or audit",
+    "Answers feel hallucinated/ungrounded and stakeholders demand verifiable, auditable provenance for every claim",
+    "Relationship questions like 'how are X and Y related?' or 'who mentored the person who founded X?' fail because embeddings encode similarity, not explicit relationships",
+    "Compliance or privacy rules forbid sending documents to cloud LLM/embedding APIs, ruling out hosted RAG stacks",
+    "Retrieval reasoning is a black box; I need a visible trace of how the system got from the query to each supporting fact"
+  ],
+  "when_to_use": [
+    "Your users ask questions whose answers span two or more documents connected by named entities (people, orgs, projects, technologies)",
+    "You are in a regulated or high-stakes domain (legal, medical, internal research) where every generated claim must be traceable to an exact source sentence",
+    "Your corpus is entity-rich and relationship-dense (org charts, research collaborations, project dependencies) rather than long free-form narrative",
+    "Data privacy requires fully on-premise inference: Ollama for the LLM, sentence-transformers for embeddings, NetworkX/Neo4j for storage",
+    "You want transparent, inspectable retrieval: the graph path (A --[DEVELOPED]--> B) is shown alongside each citation",
+    "You need both semantic entry into the corpus (vector search over entity embeddings) and structured expansion from it (bounded-hop graph traversal)"
+  ],
+  "tradeoffs": [
+    "Index build cost: one LLM extraction call per document, and extraction quality gates everything downstream; a weak local model (llama3.1) can miss entities, invent relationships, or return unparseable JSON (the notebook silently falls back to empty extractions)",
+    "Entity resolution is naive: IDs are md5 of the lowercased name, so 'Dr. Chen' and 'Dr. Sarah Chen' become separate disconnected nodes, breaking the multi-hop chains the technique exists to enable",
+    "Attribution is best-effort, not enforced: the LLM is asked to echo the exact source sentence and to cite [N]; nothing verifies the sentence actually appears in the text or that the claim matches the cited node (confidence is hardcoded at 0.9)",
+    "The demo NetworkX graph is in-memory and single-process; production scale requires migrating to Neo4j (sketched but not implemented in the notebook)",
+    "Extra query latency vs plain vector RAG: vector search over all entity embeddings (brute-force cosine, no ANN index) plus BFS traversal plus an LLM generation call",
+    "Overkill when questions are simple single-fact lookups, documents have few interconnections, or content is not entity-centric (e.g. procedural how-to text); plain vector RAG is faster and simpler there",
+    "Local models are markedly weaker than frontier APIs at structured JSON extraction, so the privacy benefit trades directly against graph quality"
+  ],
+  "how_it_works": "Indexing: each document is sent to a local LLM (Ollama, llama3.1, format='json') with a prompt that extracts entities (name, type, description, exact source_sentence) and typed relationships (source, target, relation_type, exact source_sentence). Entities become nodes in a NetworkX DiGraph keyed by md5(name.lower())[:12], with source_doc and source_sentence stored as node attributes; relationships become edges with the same provenance attributes. Each entity's 'name: description' string is embedded with sentence-transformers all-MiniLM-L6-v2 and cached in a dict. Query time (hybrid_search): (1) brute-force cosine similarity between the query embedding and all entity embeddings picks top-k entry-point entities; (2) BFS traversal (multi_hop_traverse, default max 2 hops) expands from those entry points, recording for each reached node its provenance and the human-readable path (e.g. 'Miller --[MENTORED]--> Chen'). Generation: the traversal results are formatted as a numbered [N] context; the LLM answers with inline [N] citations; a regex pulls the citation refs and maps each back to a Citation object holding source document, exact source sentence, and graph path, returned inside an AttributedAnswer with a reasoning trace. The technique spans indexing (graph construction) and generation (citation mapping), but its core novelty is the retrieval step combining vector entry points with graph traversal.",
+  "key_dependencies": [
+    "ollama (local LLM inference, llama3.1; mistral/phi3 as alternatives)",
+    "networkx (in-memory directed knowledge graph; Neo4j suggested for production)",
+    "sentence-transformers (all-MiniLM-L6-v2 local embeddings)",
+    "numpy (cosine similarity for entity vector search)",
+    "hashlib/json/re (stdlib: entity IDs, LLM JSON parsing, citation extraction)"
+  ],
+  "key_code_signals": [
+    "ollama.chat(model='llama3.1', format='json') — local structured entity/relationship extraction",
+    "class KnowledgeGraphRAG with nx.DiGraph() — in-memory knowledge graph with provenance on every node and edge",
+    "extract_entities_and_relationships() — LLM prompt requiring exact source_sentence per entity and relationship",
+    "graph.add_node(..., source_doc=..., source_sentence=...) — provenance stored as graph attributes",
+    "SentenceTransformer('all-MiniLM-L6-v2').encode() + brute-force cosine — vector_search over entity embeddings for entry points",
+    "multi_hop_traverse() — BFS up to max_hops recording path strings like '--[RELATION]-->' for attribution",
+    "hybrid_search() — vector entry points then graph expansion, the retrieval core",
+    "generate_attributed_answer() + re.findall(r'\\[(\\d+)\\]') — maps LLM inline citations back to Citation(source_document, source_sentence, graph_path)"
+  ],
+  "related_techniques": [
+    "graph_rag: alternative — LangChain-based Graph RAG in this repo, cloud-model variant without sentence-level attribution focus",
+    "Microsoft_GraphRag: alternative — Microsoft's GraphRAG with community detection and global summarization; heavier, cloud-oriented",
+    "multi_model_rag_with_captioning-or-plain vector RAG (simple_rag): alternative-baseline — prefer simple vector RAG when questions are single-hop and attribution can be chunk-level",
+    "fusion_retrieval: refines — both combine multiple retrieval signals; here the fusion is vector entry points + graph traversal instead of vector + BM25",
+    "self_rag: composes-with — self-reflective grounding checks could verify that cited sentences actually support claims, which this notebook does not enforce",
+    "raptor: alternative — hierarchical summarization tree for cross-document synthesis without explicit entity graphs",
+    "crag: composes-with — corrective retrieval evaluation could catch cases where graph extraction missed the needed entities"
+  ],
+  "complexity": "high",
+  "keywords": [
+    "graph rag",
+    "knowledge graph",
+    "multi-hop reasoning",
+    "multi-hop questions",
+    "entity extraction",
+    "relationship extraction",
+    "citations",
+    "source attribution",
+    "sentence-level attribution",
+    "provenance",
+    "verifiable answers",
+    "hallucination grounding",
+    "local llm",
+    "ollama",
+    "privacy",
+    "on-premise rag",
+    "networkx",
+    "neo4j",
+    "graph traversal",
+    "hybrid search",
+    "connect facts across documents"
+  ],
+  "summary": "Local Graph RAG with Verifiable Attribution addresses two failure modes of vector RAG: inability to answer multi-hop questions that require connecting facts across documents, and coarse chunk-level attribution that cannot prove which sentence supports a claim. At index time a local LLM (Ollama llama3.1, JSON mode) extracts typed entities and relationships from each document, each carrying its exact source sentence; these become a NetworkX directed graph whose nodes and edges store source_doc and source_sentence as provenance attributes, with entity embeddings from sentence-transformers all-MiniLM-L6-v2. At query time, hybrid search runs brute-force cosine similarity over entity embeddings to pick entry-point entities, then BFS graph traversal (default 2 hops) expands to connected facts while recording the traversal path. The answer LLM cites sources inline as [N]; a regex maps each citation to a Citation object exposing the source document, exact sentence, and graph path. Fully local (no cloud APIs), so suitable for privacy-critical deployments. Costs: per-document LLM extraction, naive md5-of-name entity resolution that fragments aliases, unverified best-effort citations, and in-memory scale limits (Neo4j sketched for production). Prefer plain vector RAG for single-hop factoid retrieval.",
+  "notes_for_chunking": "Well-structured notebook with 11 numbered markdown section headers ('## 1. Install Dependencies' ... '## 11. Production Deployment with Neo4j') that make clean chunk boundaries. Roughly balanced markdown/code ratio; markdown cells are substantive (architecture ASCII diagram, comparison tables, when-to-use guidance) rather than one-liners — the opening overview cell and section 10 comparison table are the highest-value prose chunks. One giant code cell (the ~300-line KnowledgeGraphRAG class in section 4) dominates the code volume and contains five distinct methods (extraction, add_document, vector_search, multi_hop_traverse, hybrid_search, generate_attributed_answer); a chunker should split it at method boundaries, keeping the class docstring as shared context. Sections are mostly self-contained but sections 5-9 (ingest, visualize, query demos) depend on the class defined in section 4 — prepend the class name to those chunks. Strip: the pip install cell, the warnings-filter boilerplate, emoji-heavy print scaffolding in demo cells. No execution outputs or base64 blobs present. Section 11 is markdown-only (Neo4j production sketch + references) and stands alone."
+}

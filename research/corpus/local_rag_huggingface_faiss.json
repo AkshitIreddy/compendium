@@ -1,0 +1,87 @@
+{
+  "slug": "local_rag_huggingface_faiss",
+  "title": "Fully Local RAG with HuggingFace Embeddings and FAISS",
+  "one_liner": "End-to-end RAG pipeline built entirely from free open-source components — BGE embeddings, FAISS vector search, and Zephyr-7b — so no data leaves your machine and no paid API key is needed.",
+  "stage": "orchestration",
+  "problem_solved": "Most RAG stacks assume paid hosted APIs (OpenAI embeddings + GPT), which is a blocker when data privacy rules forbid sending documents to third parties, when there is no API budget, or when the system must run offline. This technique replaces every paid component with a free local/open-source equivalent while keeping the standard RAG architecture intact.",
+  "failure_modes": [
+    "I can't use OpenAI/Anthropic because my documents are confidential (healthcare, legal, banking) and must not leave our infrastructure",
+    "Per-token API billing makes my RAG prototype or high-volume workload too expensive",
+    "I need RAG to work in an offline or low-connectivity environment",
+    "My model answers questions from its own knowledge instead of the retrieved documents (mitigated here via a strict answer-only-from-context prompt with an explicit refusal instruction)",
+    "Users don't trust answers because they can't see which document passages were used (mitigated via RunnableParallel source attribution)",
+    "Re-embedding the whole corpus on every run is slow (mitigated via FAISS save_local/load_local persistence)"
+  ],
+  "when_to_use": [
+    "Regulated or privacy-sensitive domains where document content cannot be sent to a hosted API",
+    "Cost-sensitive or early-stage projects with no API budget — everything here is free (HF token is free-tier)",
+    "Research and rapid prototyping where you want to iterate on RAG design without metering costs",
+    "You need a reference baseline: this is the canonical simple-RAG pipeline (load, chunk, embed, FAISS, top-k, grounded prompt) built with swappable open components",
+    "Air-gapped or offline deployments (swap HuggingFaceEndpoint for HuggingFacePipeline with a locally downloaded model)"
+  ],
+  "tradeoffs": [
+    "Answer quality is lower than frontier hosted models — Zephyr-7b is good but not GPT-4-class; expect weaker reasoning on complex or multi-hop questions",
+    "As written, generation is NOT actually local: HuggingFaceEndpoint calls the HuggingFace Inference API, so document context does leave the machine unless you swap in HuggingFacePipeline — the privacy claim only fully holds with the local variant",
+    "Local embedding on CPU is slow for large corpora; GPU needed for practical indexing at scale",
+    "FAISS is an in-process, single-node index — no built-in multi-tenancy, filtering ecosystem, or horizontal scaling; migrate to Milvus/Pinecone/etc. for millions of docs",
+    "Plain top-k similarity retrieval with fixed-size chunks inherits all baseline-RAG weaknesses (no reranking, no query transformation, no context enrichment) — this is a foundation, not a retrieval-quality technique",
+    "You take on ops burden: model downloads, hardware provisioning, and inference latency management that hosted APIs would handle"
+  ],
+  "how_it_works": "This is a standard linear RAG pipeline where every component is a free/open-source substitute for the usual paid one; it therefore spans indexing, retrieval, and generation, with orchestration via LangChain LCEL. (1) Indexing: PyPDFLoader loads a PDF, RecursiveCharacterTextSplitter chunks it (chunk_size=1000, overlap=200), and HuggingFaceEmbeddings with BAAI/bge-base-en-v1.5 (768-dim, CPU, normalize_embeddings=True for cosine similarity) embeds the chunks into a FAISS index built via FAISS.from_documents; the index can be persisted with save_local/load_local. (2) Retrieval: vectorstore.as_retriever(search_type='similarity', k=3), tested independently before attaching the LLM to isolate retrieval quality from generation quality. (3) Generation: HuggingFaceEndpoint runs zephyr-7b-beta (temperature=0.1, do_sample=False) against a strict grounding prompt that instructs the model to answer ONLY from context and emit a fixed refusal string otherwise; an out-of-scope question is included to verify refusal behavior. (4) The LCEL chain composes retriever | format_docs (which prefixes each chunk with its page number) | prompt | llm | StrOutputParser, and a RunnableParallel variant returns both the answer and the source documents for attribution/auditability. A lightweight keyword-hit-rate evaluation closes the notebook.",
+  "key_dependencies": [
+    "langchain / langchain-core (LCEL: RunnablePassthrough, RunnableParallel, StrOutputParser, PromptTemplate)",
+    "langchain-community (PyPDFLoader, FAISS vectorstore wrapper)",
+    "langchain-huggingface (HuggingFaceEmbeddings, HuggingFaceEndpoint)",
+    "faiss-cpu",
+    "sentence-transformers (backend for BGE embeddings)",
+    "transformers / huggingface_hub / accelerate",
+    "pypdf",
+    "python-dotenv (HF token loading)"
+  ],
+  "key_code_signals": [
+    "HuggingFaceEmbeddings(model_name='BAAI/bge-base-en-v1.5', encode_kwargs={'normalize_embeddings': True})",
+    "FAISS.from_documents(documents=chunks, embedding=embeddings)",
+    "HuggingFaceEndpoint(repo_id='HuggingFaceH4/zephyr-7b-beta', task='text-generation', temperature=0.1)",
+    "RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)",
+    "vectorstore.as_retriever(search_type='similarity', search_kwargs={'k': 3})",
+    "rag_chain = {'context': retriever | format_docs, 'question': RunnablePassthrough()} | prompt | llm | StrOutputParser()",
+    "RunnableParallel(answer=rag_chain, sources=retriever) for source attribution",
+    "Grounding prompt: 'Answer the question using ONLY the context provided' with explicit refusal string"
+  ],
+  "related_techniques": [
+    "simple_rag: alternative — same baseline pipeline architecture using paid OpenAI embeddings/LLM instead of local open-source components",
+    "reranking: composes-with — notebook explicitly recommends adding a reranker after FAISS top-k for better precision",
+    "choose_chunk_size: refines — the fixed chunk_size=1000/overlap=200 here is a tunable this technique addresses",
+    "simple_csv_rag: sibling baseline — same pattern for tabular data",
+    "contextual_compression / relevant_segment_extraction: composes-with — post-retrieval filtering can be layered onto this retriever",
+    "raptor / graph_rag: alternatives at the indexing stage when flat chunk retrieval underperforms; the local embedding/LLM substitution shown here applies to them too"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "local RAG",
+    "offline RAG",
+    "open source RAG",
+    "no API key",
+    "free RAG",
+    "privacy preserving RAG",
+    "on-premise",
+    "self-hosted",
+    "HuggingFace embeddings",
+    "BGE embeddings",
+    "bge-base-en-v1.5",
+    "FAISS",
+    "faiss-cpu",
+    "Zephyr 7b",
+    "sentence-transformers",
+    "LangChain LCEL",
+    "vector store persistence",
+    "source attribution",
+    "grounded answers",
+    "hallucination refusal",
+    "healthcare legal finance compliance",
+    "air-gapped"
+  ],
+  "summary": "A fully open-source, zero-API-cost RAG baseline for teams that cannot or will not send documents to hosted APIs. It keeps the canonical pipeline — PyPDFLoader + RecursiveCharacterTextSplitter (1000 chars, 200 overlap), embed, index, top-k retrieve, grounded generation — but swaps paid components for free ones: BAAI/bge-base-en-v1.5 embeddings run locally on CPU with normalized vectors for cosine similarity, FAISS provides in-process vector search with save_local/load_local persistence, and zephyr-7b-beta generates answers via the free HuggingFace Inference API (swap to HuggingFacePipeline for fully offline inference — as written, generation still calls a remote endpoint). A strict prompt forces answering only from retrieved context with an explicit refusal string, verified with an out-of-scope question; RunnableParallel returns retrieved source chunks with page numbers for auditability. Choose this for privacy-sensitive domains (healthcare, legal, banking), zero-budget prototyping, or offline deployments. Do not expect frontier-model answer quality, retrieval sophistication beyond plain similarity top-k, or FAISS to scale past a single node — layer reranking or migrate to a managed vector DB as needs grow.",
+  "notes_for_chunking": "Well-structured notebook, easy to chunk. The opening markdown cell is dense and self-contained: overview, motivation, ASCII pipeline diagram, and benefits list — it makes an excellent standalone chunk. Every code cell is preceded by a short '### Header' markdown cell that accurately names what follows, so header-anchored splitting works cleanly; pair each header+explanation markdown cell with its following code cell as one chunk. Markdown/code ratio is roughly 50/50 with 33 cells total. Code cells are small (10-40 lines), each defining one well-docstringed function then calling it — self-contained per section. Strip as junk: cell-2 (pip install), cell-4 (git clone + wget data download), cell-6 (token loading boilerplate), and the final cell-32 (analytics tracking image). Cell-8 (imports) is boilerplate but useful as a dependency signal. The closing markdown cell (cell-31) contains a comparison table (local vs OpenAI RAG), when-to-use bullets, and next steps — high-value for retrieval, keep as its own chunk. No giant outputs or base64 blobs; the notebook appears unexecuted or output-stripped.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/local_rag_huggingface_faiss.json"
+}

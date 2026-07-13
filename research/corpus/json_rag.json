@@ -1,0 +1,76 @@
+{
+  "slug": "json_rag",
+  "title": "Simple RAG with JSON (jrag field-selective embedding)",
+  "one_liner": "Turn structured JSON records into clean, field-selective text strings via jsonpath expressions, embed them locally, and semantically search them with FAISS while keeping a mapping back to the full original records.",
+  "stage": "indexing",
+  "problem_solved": "Semantic retrieval over structured JSON data. Embedding models understand text, not nested JSON; naively flattening whole records into strings pollutes embeddings with irrelevant keys, IDs, and noise, degrading retrieval quality. This technique uses the jrag library with jsonpath-ng expressions to extract only the semantically meaningful fields of each JSON record into a labeled, human-readable text string, embeds those strings, and retrieves the closest records for a natural-language query — returning the complete original JSON object, not just a text snippet.",
+  "failure_modes": [
+    "My data is JSON records (API responses, exports, catalogs), not documents, and standard document chunking/RAG pipelines do not fit it",
+    "Keyword search over my structured data only finds exact word matches, not queries phrased by meaning or concept",
+    "Embedding raw or fully flattened JSON gives poor retrieval because IDs, keys, and irrelevant fields dominate the vector",
+    "After retrieval I only get a text snippet and lose the link back to the full structured record with all its fields",
+    "Inconsistent field formatting across records (e.g., names split across firstname/surname or merged) makes matching unreliable"
+  ],
+  "when_to_use": [
+    "Your corpus is a list of JSON records (products, events, awards, tickets, API payloads) where each record has many fields but only a few carry searchable meaning",
+    "Users query in natural language ('breakthrough in medicine') and you need meaning-based matches, not exact keyword hits",
+    "You need the full original record back after retrieval so downstream code can use all its fields",
+    "Small-to-medium corpora (hundreds to low hundreds of thousands of records) where an exhaustive flat FAISS index is fast enough",
+    "You want a fully local, no-API-key pipeline (sentence-transformers + faiss-cpu) for prototyping structured-data search"
+  ],
+  "tradeoffs": [
+    "Requires hand-writing a jsonpath config per JSON schema; brittle when the schema changes and needs dataset-specific preprocessing (e.g., merging name fields)",
+    "Retrieval-only as implemented: there is no LLM generation/answer-synthesis step, so you must bolt on a generator for full RAG question answering",
+    "One embedding per record: very large or deeply nested records may exceed what a single 384-dim MiniLM vector can represent; no sub-record chunking",
+    "IndexFlatL2 is exhaustive search — fine at 676 records, but needs swapping for IVF/HNSW index types at millions of records",
+    "Pure dense retrieval on selected text: exact-value queries (specific years, IDs, numeric filters) and aggregation questions ('how many prizes since 1990') are better served by structured filters or SQL, not semantic search",
+    "No hybrid/BM25 component and no score normalization (raw L2 distances), so precise-term matching can underperform"
+  ],
+  "how_it_works": "Primarily an indexing technique (data representation for embedding), with the retrieval step being a standard vector search. Pipeline: (1) Load JSON data (Nobel Prize dataset from api.nobelprize.org, 676 records) and normalize inconsistent fields — e.g., combine 'firstname' and 'surname' into a 'full_name' field. (2) Define a jrag_config dict mapping human-readable labels to jsonpath-ng expressions, e.g. {'Year': '$.year', 'Laureats': '$.laureates[*].full_name', 'Motivation': '$.laureates[0].motivation'}. (3) Call jrag.to_text(record, config) / jrag.tag_list(records, config) to produce a clean labeled string per record ('Year: 2024 | Category: chemistry | Laureats: [David Baker, ...] | Motivation: ...') stored under 'jrag_text'. (4) Build two parallel lists: corpus_texts (the jrag_text strings) and corpus_metadata (the full original JSON objects), so FAISS result indices map back to complete records. (5) Embed corpus_texts with SentenceTransformer('all-MiniLM-L6-v2') (384-dim, float32). (6) Index with faiss.IndexFlatL2 and add all embeddings. (7) At query time, encode the query with the same model, run index.search(query_embedding, k), and use the returned indices to fetch the full original JSON records ranked by L2 distance. No LLM is called anywhere; the technique is embedding + vector search over structured records.",
+  "key_dependencies": [
+    "jrag (JSON-to-text extraction via jsonpath-ng expressions)",
+    "jsonpath-ng (used internally by jrag for field targeting)",
+    "sentence-transformers (all-MiniLM-L6-v2 local embedding model)",
+    "faiss-cpu (IndexFlatL2 vector index)",
+    "numpy",
+    "requests (fetching the sample Nobel Prize JSON dataset)"
+  ],
+  "key_code_signals": [
+    "jrag_config = {'Year': '$.year', 'Laureats': '$.laureates[*].full_name', ...} — labels mapped to jsonpath-ng expressions",
+    "jrag.to_text(first_record, jrag_config) — single-record JSON-to-text projection",
+    "jrag.tag_list(prizes_lst, jrag_config) — batch-tags every record with a 'jrag_text' field",
+    "SentenceTransformer('all-MiniLM-L6-v2') and model.encode(corpus_texts, convert_to_numpy=True)",
+    "faiss.IndexFlatL2(embedding_dim); index.add(corpus_embeddings)",
+    "distances, indices = index.search(query_embedding, NUM_NEIGHBORS)",
+    "corpus_metadata parallel list mapping FAISS indices back to full original JSON objects"
+  ],
+  "related_techniques": [
+    "simple_rag: foundational sibling — same embed-and-retrieve skeleton but for unstructured text documents instead of JSON records",
+    "simple_csv_rag: alternative for tabular data stored as CSV rather than nested JSON",
+    "fusion_retrieval: composes — the jrag-derived text strings could also feed a BM25 index for hybrid dense+sparse retrieval over JSON",
+    "choose_chunk_size: alternative concern — record-per-embedding here replaces document chunking entirely",
+    "metadata_filtering-style approaches: refinement — retained original JSON fields enable post-retrieval structured filtering on exact values"
+  ],
+  "complexity": "low",
+  "keywords": [
+    "json rag",
+    "semantic search over json",
+    "structured data rag",
+    "jsonpath",
+    "jsonpath-ng",
+    "jrag",
+    "embed json records",
+    "json to text for embedding",
+    "faiss IndexFlatL2",
+    "sentence-transformers",
+    "all-MiniLM-L6-v2",
+    "search api responses",
+    "record-level retrieval",
+    "catalog search",
+    "map vector hits back to source records",
+    "field selection for embeddings"
+  ],
+  "summary": "Technique for semantic retrieval over structured JSON data instead of documents. Problem: embedding models need text, and naively flattening JSON records into strings pollutes embeddings with IDs, keys, and irrelevant fields, causing poor retrieval; keyword search over JSON only matches exact terms. Solution: define a jrag config mapping readable labels to jsonpath-ng expressions ('$.year', '$.laureates[*].full_name'), use jrag.to_text / jrag.tag_list to project only the meaningful fields of each record into a clean labeled string, embed those strings locally with sentence-transformers all-MiniLM-L6-v2, and index them in a FAISS IndexFlatL2. A parallel metadata list maps every FAISS hit back to the complete original JSON object, so retrieval returns full structured records ranked by L2 distance, not text fragments. Demonstrated on 676 Nobel Prize records with a natural-language query. Retrieval-only (no LLM generation step), fully local, no API keys. Best for catalogs, events, and API-export corpora at small-to-medium scale; requires per-schema jsonpath configuration and swaps in scalable FAISS index types for very large corpora.",
+  "notes_for_chunking": "Well-structured beginner tutorial with clean stage-per-section headers: '# Installs', '# Imports', '# JSON Data - Nobel Prizes' (with '## Download' and '## Data processing' subsections), '# Text to be embed' (with '## Single Example' and '## Add to all records'), '# Build corpus', '# Generate embeddings', '# Build FAISS Index', '# Query'. Nearly every code cell is preceded by a markdown cell that explains it in numbered steps, so markdown+code pairs are self-contained natural chunks. Markdown/code ratio is roughly balanced and prose quality is high (explains 'why' as well as 'what'). Junk to strip: the pip-install cell, a tqdm/ipywidgets warning in the imports output, a verbose exception-handling boilerplate block in the download cell, embedding progress-bar output, and large JSON dumps in outputs (first-3-records sample, and five full-record search results at the end) which are illustrative but bulky. No base64 images. The intro markdown cells (motivation for jrag and embeddings) are conceptually valuable and should be kept with the technique's problem statement.",
+  "file_written": "C:/Users/akshi/Desktop/Code Palace/rag knowledge base/research/corpus/json_rag.json"
+}
