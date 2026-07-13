@@ -3,6 +3,7 @@ import type { Advisory, Recommendation, SpanCitation } from "../../lib/types";
 import { ipc } from "../../lib/ipc";
 import { CitedMarkdown } from "./CitedMarkdown";
 import { RecommendationCard } from "./RecommendationCard";
+import { SafeHtml } from "../../components/SafeHtml";
 
 export interface SourceRequest {
   packId: string;
@@ -23,7 +24,7 @@ export const AdvisoryView = memo(function AdvisoryView({
   onOpenSource: (req: SourceRequest) => void;
 }) {
   const [activeCite, setActiveCite] = useState<SpanCitation | null>(null);
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"idle" | "copied" | "failed">("idle");
 
   function handleCite(citation: SpanCitation) {
     setActiveCite(citation);
@@ -57,10 +58,14 @@ export const AdvisoryView = memo(function AdvisoryView({
   }
 
   async function copyDossier() {
-    const md = await ipc.exportDossier(turnId);
-    await navigator.clipboard.writeText(md);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    try {
+      const md = await ipc.exportDossier(turnId);
+      await navigator.clipboard.writeText(md);
+      setCopied("copied");
+    } catch {
+      setCopied("failed");
+    }
+    setTimeout(() => setCopied("idle"), 2500);
   }
 
   if (advisory.clarifying_question) {
@@ -144,7 +149,11 @@ export const AdvisoryView = memo(function AdvisoryView({
                        text-[length:var(--text-sm)] font-medium transition-token
                        hover:border-edge-strong hover:bg-raised"
           >
-            {copied ? "✓ Copied" : "Copy dossier for another AI"}
+            {copied === "copied"
+              ? "✓ Copied"
+              : copied === "failed"
+                ? "Copy failed — try again"
+                : "Copy dossier for another AI"}
           </button>
           <span className="text-[length:var(--text-xs)] text-muted">
             {advisory.evidence.length} evidence excerpts · {advisory.citations.length} citations ·{" "}
@@ -156,7 +165,7 @@ export const AdvisoryView = memo(function AdvisoryView({
       {advisory.attribution_html.length > 0 && advisory.answer_md && (
         <footer className="border-t border-edge pt-2 text-[length:var(--text-xs)] text-muted">
           {advisory.attribution_html.map((a, i) => (
-            <span key={i} dangerouslySetInnerHTML={{ __html: a }} />
+            <SafeHtml key={i} html={a} />
           ))}
         </footer>
       )}

@@ -4,6 +4,7 @@ import { ipc } from "../../lib/ipc";
 import type { NotebookCell, PackDocument, Technique } from "../../lib/types";
 import type { SourceRequest } from "../chat/AdvisoryView";
 import { Markdown } from "../../components/Markdown";
+import { SafeHtml } from "../../components/SafeHtml";
 import { NotebookViewer } from "./NotebookViewer";
 
 function parseJsonArray(s: string): string[] {
@@ -128,6 +129,7 @@ export function SourcePanel({
   const [view, setView] = useState<"card" | "document">("card");
 
   useEffect(() => {
+    let cancelled = false;
     setTechnique(null);
     setDoc(null);
     setError(null);
@@ -137,17 +139,21 @@ export function SourcePanel({
       try {
         if (request.slug) {
           const t = await ipc.techniqueGet(request.packId, request.slug);
+          if (cancelled) return;
           setTechnique(t);
           const d = await ipc.documentGet(request.packId, t.document_id);
-          setDoc(d);
+          if (!cancelled) setDoc(d);
         } else if (request.documentId != null) {
           const d = await ipc.documentGet(request.packId, request.documentId);
-          setDoc(d);
+          if (!cancelled) setDoc(d);
         }
       } catch (e) {
-        setError(e instanceof Error ? e.message : JSON.stringify(e));
+        if (!cancelled) setError(e instanceof Error ? e.message : JSON.stringify(e));
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [request]);
 
   const { cells, markdownText } = (() => {
@@ -230,7 +236,7 @@ export function SourcePanel({
 
       {doc && (
         <footer className="border-t border-edge px-[length:var(--sp-3)] py-[length:var(--sp-2)] text-[length:var(--text-xs)] text-muted">
-          <p dangerouslySetInnerHTML={{ __html: doc.attribution_html }} />
+          <p><SafeHtml html={doc.attribution_html} /></p>
           <a
             href={doc.source_url}
             target="_blank"

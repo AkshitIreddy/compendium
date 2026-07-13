@@ -14,26 +14,50 @@ const schema = {
   },
 };
 
-/** Splice citation spans into the source markdown as `[text](cite:i)` links,
- * skipping spans that would break fenced code blocks. Offsets reference the
- * raw markdown string (Cohere cites against the text it generated). */
+/** Splice citation spans into the source markdown as `[text](cite:i)` links.
+ *
+ * Cohere reports start/end in Unicode code points against the text it
+ * generated, while JS string indices are UTF-16 code units — any astral
+ * character before a span shifts the raw offsets. Rather than trusting them,
+ * each span is verified against citation.text and, on mismatch, relocated to
+ * the nearest occurrence of that text; unlocatable or structure-breaking
+ * spans are skipped (the prose stays intact, just unmarked). */
 function spliceCitations(md: string, citations: SpanCitation[]): string {
   if (!citations.length) return md;
-  const sorted = [...citations]
-    .map((c, i) => ({ ...c, i }))
-    .filter((c) => c.start < c.end && c.end <= md.length)
+
+  const located = citations
+    .map((c, i) => {
+      if (!c.text || c.text.length > 500) return null;
+      let start = c.start;
+      if (md.slice(start, start + c.text.length) !== c.text) {
+        // offset drifted (code points vs UTF-16) — find nearest occurrence
+        const before = md.lastIndexOf(c.text, Math.min(start, md.length));
+        const after = md.indexOf(c.text, Math.max(0, start - c.text.length));
+        const candidates = [before, after].filter((p) => p >= 0);
+        if (!candidates.length) return null;
+        start = candidates.reduce((a, b) =>
+          Math.abs(a - c.start) <= Math.abs(b - c.start) ? a : b,
+        );
+      }
+      return { i, start, end: start + c.text.length, text: c.text };
+    })
+    .filter((c): c is { i: number; start: number; end: number; text: string } => c !== null)
     .sort((a, b) => a.start - b.start);
 
   let out = "";
   let pos = 0;
-  for (const c of sorted) {
+  for (const c of located) {
     if (c.start < pos) continue; // overlapping span — keep the first
-    const inner = md.slice(c.start, c.end);
-    if (inner.includes("```") || inner.includes("\n\n")) {
-      continue; // would break block structure; skip the mark, keep the text
+    if (
+      c.text.includes("```") ||
+      c.text.includes("\n\n") ||
+      c.text.includes("[") ||
+      c.text.includes("]")
+    ) {
+      continue; // would break block or link structure; keep text unmarked
     }
     out += md.slice(pos, c.start);
-    out += `[${inner}](cite:${c.i})`;
+    out += `[${c.text}](cite:${c.i})`;
     pos = c.end;
   }
   out += md.slice(pos);

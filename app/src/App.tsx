@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { ipc } from "./lib/ipc";
 import type {
@@ -35,6 +35,9 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const { settings, update } = useSettings();
+  // last-request-wins guard: navigation during an in-flight advisor call or
+  // conversation load must not be clobbered by the older response
+  const navSeq = useRef(0);
 
   const refreshConversations = useCallback(() => {
     ipc.conversationList().then(setConversations).catch(() => {});
@@ -79,13 +82,22 @@ export default function App() {
   }, []);
 
   const openConversation = useCallback(async (id: number) => {
+    const seq = ++navSeq.current;
     setActiveId(id);
     setError(null);
-    const detail = await ipc.conversationGet(id);
-    setTurns(detail.turns);
+    try {
+      const detail = await ipc.conversationGet(id);
+      if (navSeq.current === seq) setTurns(detail.turns);
+    } catch (e) {
+      if (navSeq.current === seq) {
+        setError((e as { message?: string }).message ?? "Could not load conversation.");
+        setTurns([]);
+      }
+    }
   }, []);
 
   function newConversation() {
+    navSeq.current++;
     setActiveId(null);
     setTurns([]);
     setError(null);
@@ -115,13 +127,17 @@ export default function App() {
         created_at: new Date().toISOString(),
       },
     ]);
+    const seq = navSeq.current;
     try {
       const result = await ipc.advisorAsk(message, activeId, tier);
-      setActiveId(result.conversation_id);
-      const detail = await ipc.conversationGet(result.conversation_id);
-      setTurns(detail.turns);
       refreshConversations();
       play("result");
+      // apply only if the user hasn't navigated away mid-request
+      if (navSeq.current === seq) {
+        setActiveId(result.conversation_id);
+        const detail = await ipc.conversationGet(result.conversation_id);
+        if (navSeq.current === seq) setTurns(detail.turns);
+      }
     } catch (e) {
       const err = e as IpcError;
       setError(
@@ -132,8 +148,8 @@ export default function App() {
             : (err.message ?? "Something went wrong."),
       );
       play("error");
-      // roll back the optimistic turn on hard failure
-      setTurns((prev) => prev.filter((t) => t.id > 0));
+      // roll back the optimistic turn on hard failure (unless user navigated)
+      if (navSeq.current === seq) setTurns((prev) => prev.filter((t) => t.id > 0));
     } finally {
       setBusy(false);
       setStage(null);
@@ -244,10 +260,11 @@ function ComposerWithSeed({
   seed: string | null;
   onSeedUsed: () => void;
 }) {
+  const { settings } = useSettings();
   useEffect(() => {
     if (seed && !busy) {
       onSeedUsed();
-      onSend(seed, "balanced");
+      onSend(seed, settings.tier);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seed]);

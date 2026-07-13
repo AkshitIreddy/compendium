@@ -4,6 +4,7 @@ import { ipc } from "../../lib/ipc";
 import { useSettings, type UiSettings } from "../../lib/settings";
 import { play, type SoundEvent } from "../../lib/sound";
 import type { KeyStatus, PackInfo, Quota } from "../../lib/types";
+import { SafeHtml } from "../../components/SafeHtml";
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -322,10 +323,9 @@ export function SettingsPanel({
                     <span className="text-[length:var(--text-xs)] text-muted">v{p.pack_version}</span>
                   </div>
                   <p className="mt-1 text-[length:var(--text-xs)] text-secondary">{p.description}</p>
-                  <p
-                    className="mt-2 border-t border-edge pt-2 text-[length:var(--text-xs)] text-muted"
-                    dangerouslySetInnerHTML={{ __html: p.attribution_html }}
-                  />
+                  <p className="mt-2 border-t border-edge pt-2 text-[length:var(--text-xs)] text-muted">
+                    <SafeHtml html={p.attribution_html} />
+                  </p>
                 </div>
               ))}
             </Section>
