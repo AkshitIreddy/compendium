@@ -1,3 +1,4 @@
+pub mod advisor;
 pub mod appdb;
 pub mod cohere;
 pub mod keys;

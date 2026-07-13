@@ -231,11 +231,12 @@ impl CohereClient {
         temperature: f64,
     ) -> Result<(String, Value)> {
         self.chat_pacer.acquire().await;
+        // No citation_options: command-a-03-2025 rejects explicit modes
+        // (verified live 2026-07); the default already returns span citations.
         let body = json!({
             "model": model,
             "messages": messages,
             "documents": documents,
-            "citation_options": {"mode": "ACCURATE"},
             "temperature": temperature,
         });
         let v = self.post("/v2/chat", body).await?;

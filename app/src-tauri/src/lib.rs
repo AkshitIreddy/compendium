@@ -40,8 +40,8 @@ pub fn run() {
 
             app.manage(AppState {
                 packs: RwLock::new(Vec::new()),
-                cohere,
-                appdb: Mutex::new(conn),
+                cohere: std::sync::Arc::new(cohere),
+                appdb: std::sync::Arc::new(Mutex::new(conn)),
             });
 
             // Pack loading happens off the main thread so the window shows
@@ -93,6 +93,13 @@ pub fn run() {
             commands::settings_get_all,
             commands::settings_set,
             commands::quota_get,
+            commands::advisor_ask,
+            commands::conversation_list,
+            commands::conversation_get,
+            commands::conversation_rename,
+            commands::conversation_delete,
+            commands::conversation_search,
+            commands::export_dossier,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

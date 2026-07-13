@@ -8,6 +8,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::State;
 
+use crate::engine::advisor;
 use crate::engine::cohere::CohereClient;
 use crate::engine::pack::{LoadedPack, PackManifest};
 use crate::engine::search::{self, SearchOptions, SearchResponse};
@@ -16,8 +17,23 @@ use crate::error::{Error, Result};
 
 pub struct AppState {
     pub packs: RwLock<Vec<Arc<LoadedPack>>>,
-    pub cohere: CohereClient,
-    pub appdb: Mutex<Connection>,
+    pub cohere: Arc<CohereClient>,
+    pub appdb: Arc<Mutex<Connection>>,
+}
+
+impl AppState {
+    fn advisor_deps(&self, app: &tauri::AppHandle) -> advisor::Deps {
+        let handle = app.clone();
+        advisor::Deps {
+            packs: self.packs.read().clone(),
+            cohere: self.cohere.clone(),
+            appdb: self.appdb.clone(),
+            notify: Arc::new(move |event, payload| {
+                use tauri::Emitter;
+                let _ = handle.emit(event, payload);
+            }),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -195,6 +211,140 @@ pub fn technique_get(state: State<'_, AppState>, pack_id: String, slug: String) 
         .collect();
     technique["failure_modes"] = Value::Array(fms);
     Ok(technique)
+}
+
+// ------------------------------------------------------------ conversations
+
+#[tauri::command]
+pub async fn advisor_ask(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    conversation_id: Option<i64>,
+    message: String,
+    tier: Option<advisor::types::Tier>,
+) -> Result<advisor::types::AdvisorTurn> {
+    let deps = state.advisor_deps(&app);
+    advisor::ask(deps, conversation_id, message, tier).await
+}
+
+#[tauri::command]
+pub fn conversation_list(state: State<'_, AppState>) -> Result<Value> {
+    let conn = state.appdb.lock();
+    let mut stmt = conn.prepare(
+        "SELECT id, title, created_at, updated_at, archived FROM conversations
+         WHERE archived = 0 ORDER BY updated_at DESC",
+    )?;
+    let rows: Vec<Value> = stmt
+        .query_map([], |r| {
+            Ok(serde_json::json!({
+                "id": r.get::<_, i64>(0)?,
+                "title": r.get::<_, String>(1)?,
+                "created_at": r.get::<_, String>(2)?,
+                "updated_at": r.get::<_, String>(3)?,
+            }))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(Value::Array(rows))
+}
+
+#[tauri::command]
+pub fn conversation_get(state: State<'_, AppState>, conversation_id: i64) -> Result<Value> {
+    let conn = state.appdb.lock();
+    let title: String = conn.query_row(
+        "SELECT title FROM conversations WHERE id = ?1",
+        [conversation_id],
+        |r| r.get(0),
+    )?;
+    let mut stmt = conn.prepare(
+        "SELECT id, role, content_md, advisory, citations, created_at FROM turns
+         WHERE conversation_id = ?1 ORDER BY id",
+    )?;
+    let turns: Vec<Value> = stmt
+        .query_map([conversation_id], |r| {
+            Ok(serde_json::json!({
+                "id": r.get::<_, i64>(0)?,
+                "role": r.get::<_, String>(1)?,
+                "content_md": r.get::<_, String>(2)?,
+                "advisory": r.get::<_, Option<String>>(3)?
+                    .and_then(|s| serde_json::from_str::<Value>(&s).ok()),
+                "citations": r.get::<_, Option<String>>(4)?
+                    .and_then(|s| serde_json::from_str::<Value>(&s).ok()),
+                "created_at": r.get::<_, String>(5)?,
+            }))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(serde_json::json!({"id": conversation_id, "title": title, "turns": turns}))
+}
+
+#[tauri::command]
+pub fn conversation_rename(
+    state: State<'_, AppState>,
+    conversation_id: i64,
+    title: String,
+) -> Result<()> {
+    let conn = state.appdb.lock();
+    advisor::context::conversation_set_title(&conn, conversation_id, &title)
+}
+
+#[tauri::command]
+pub fn conversation_delete(state: State<'_, AppState>, conversation_id: i64) -> Result<()> {
+    let conn = state.appdb.lock();
+    conn.execute("DELETE FROM turn_traces WHERE turn_id IN (SELECT id FROM turns WHERE conversation_id = ?1)", [conversation_id])?;
+    conn.execute("DELETE FROM turns_fts WHERE rowid IN (SELECT id FROM turns WHERE conversation_id = ?1)", [conversation_id])?;
+    conn.execute("DELETE FROM turns WHERE conversation_id = ?1", [conversation_id])?;
+    conn.execute("DELETE FROM summaries WHERE conversation_id = ?1", [conversation_id])?;
+    conn.execute("DELETE FROM conversation_state WHERE conversation_id = ?1", [conversation_id])?;
+    conn.execute("DELETE FROM conversations WHERE id = ?1", [conversation_id])?;
+    Ok(())
+}
+
+#[tauri::command]
+pub fn conversation_search(state: State<'_, AppState>, query: String) -> Result<Value> {
+    let conn = state.appdb.lock();
+    let Some(expr) = crate::engine::search::fts_query(&query) else {
+        return Ok(Value::Array(Vec::new()));
+    };
+    let mut stmt = conn.prepare(
+        "SELECT t.conversation_id, c.title, snippet(turns_fts, 0, '<b>', '</b>', '…', 12)
+         FROM turns_fts JOIN turns t ON t.id = turns_fts.rowid
+         JOIN conversations c ON c.id = t.conversation_id
+         WHERE turns_fts MATCH ?1 ORDER BY rank LIMIT 20",
+    )?;
+    let rows: Vec<Value> = stmt
+        .query_map([expr], |r| {
+            Ok(serde_json::json!({
+                "conversation_id": r.get::<_, i64>(0)?,
+                "title": r.get::<_, String>(1)?,
+                "snippet": r.get::<_, String>(2)?,
+            }))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(Value::Array(rows))
+}
+
+/// Export a turn's advisory as the hand-to-another-AI markdown dossier.
+#[tauri::command]
+pub fn export_dossier(state: State<'_, AppState>, turn_id: i64) -> Result<String> {
+    let conn = state.appdb.lock();
+    let (conversation_id, advisory_json): (i64, Option<String>) = conn.query_row(
+        "SELECT conversation_id, advisory FROM turns WHERE id = ?1",
+        [turn_id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )?;
+    let advisory: advisor::types::Advisory = advisory_json
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .ok_or_else(|| Error::Internal("turn has no advisory".into()))?;
+    let title: String = conn.query_row(
+        "SELECT title FROM conversations WHERE id = ?1",
+        [conversation_id],
+        |r| r.get(0),
+    )?;
+    let problem = advisor::context::state_load(&conn, conversation_id)?
+        .pinned_problem;
+    Ok(advisor::export::to_markdown(&advisory, &title, problem.as_deref()))
 }
 
 #[tauri::command]
