@@ -319,7 +319,7 @@ The merged evidence — typically 30–40 chunks — goes to Cohere's [cross-enc
 cross-encoder reads query and document *together*, so it's far more precise than the
 embedding similarity that produced the candidates. Then, locally:
 
-- **[Adaptive-k](#g-adaptive-k)**: instead of keeping a fixed top-N, the list is cut at the score
+- **[Adaptive-k](#g-adaptive-k)** [🍪](#s-adaptive-k): instead of keeping a fixed top-N, the list is cut at the score
   *cliff* — where relevance drops sharply — so weak evidence never pads the context.
 - **Diversity caps**: at most 2–3 chunks per technique, so one well-documented
   technique can't crowd out the comparison the dossier needs.
@@ -912,6 +912,44 @@ doesn't change per arm — only the measurement's quality might. Once every arm 
 maps are flattened, sorted (cards by `fusion_score` then `arms_hit`, capped to 14; evidence
 by best cosine, capped to 40), and that single flattened list is what S4 reranking receives
 — not one arm's answer, a fold of all of them.
+
+<a id="s-adaptive-k"></a>
+#### Adaptive-k: cutting the list at the cliff, not a fixed count
+**Analogy.** Say you asked for "the best cookies in the jar" and got a fixed rule: always
+hand over exactly 18. Some days the jar really does have 18 excellent cookies. Other days
+cookies #1–6 are great and everything after is stale, bland leftovers that just happened
+to be the least-bad of what remained — a fixed count can't tell the two situations apart,
+so on a weak day you get padded with cookies nobody actually wanted. Adaptive-k instead
+watches quality scores while counting down the ranked pile, looking for a **cliff** — the
+exact point where quality suddenly drops off a ledge instead of gently tapering — and
+stops handing out cookies right there, even if that means 6 instead of 18.
+
+**Mechanics.** From [`select_evidence`](app/src-tauri/src/engine/advisor/mod.rs) in
+`engine/advisor/mod.rs`, after the pool is sorted by Cohere rerank score:
+
+```rust
+let mut cut = pool.len().min(18);
+for i in 1..pool.len().min(18) {
+    let prev = pool[i - 1].rerank_score.unwrap_or(0.0);
+    let cur = pool[i].rerank_score.unwrap_or(0.0);
+    if cur < 0.30 && prev > 0.0 && cur / prev.max(1e-6) < 0.45 {
+        cut = i;
+        break;
+    }
+}
+pool.truncate(cut.max(6).min(pool.len()));
+```
+
+Two conditions have to fire *together* at a position for it to count as a cliff: the
+current score must already be weak on its own (`< 0.30` — a slow taper from 0.95 to 0.75
+never trips this), **and** it must be a sharp relative fall from the previous score
+(`< 45%` of it). The moment both are true, the loop cuts there and stops scanning. If no
+cliff ever appears in the first 18, all 18 are kept. The result is clamped both ways —
+`max(6)` guarantees the dossier is never starved of evidence even after an early cliff,
+`min(pool.len())` guarantees it never asks for more than exists. This runs *before* the
+diversity-cap and token-budget pass right after it, so adaptive-k decides how deep the
+good evidence goes; diversity/budget then decides how that survives set gets distributed
+across techniques.
 
 ---
 
