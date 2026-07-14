@@ -614,15 +614,15 @@ Follow-ups are first-class ([design](research/context-management.md),
 1. **Pinned anchor** — the user's original problem statement, verbatim, never truncated
    or paraphrased (paraphrase drift is how advisors forget constraints)
 2. **Sliding window** — the last ~3 raw exchanges
-3. **Running summary** — older turns folded in *asynchronously after* each turn commits,
+3. **Running summary** [🍪](#s-running-summary) — older turns folded in *asynchronously after* each turn commits,
    never at the context cliff where the summarizer is already degraded
 
-Anti-repetition is structural: advisories are validated JSON, so "what the advisor
+Anti-repetition is structural [🍪](#s-anti-repetition): advisories are validated JSON, so "what the advisor
 already said" compresses losslessly into an advisor-state object (slugs + verdicts)
 instead of prose replay. Retrieved evidence is cached per conversation
 (`candidate_pool`), so drill-down follow-ups reuse it via free local fetches.
 
-Every turn writes a **trace** (route, standalone query, per-stage retrieval ids + scores,
+Every turn writes a **trace** [🍪](#s-trace-replay) (route, standalone query, per-stage retrieval ids + scores,
 models, latency, validation outcomes) — a few KB per turn, enough to debug routing
 quality without storing chunk texts. History re-renders fully offline from stored
 advisory JSON.
@@ -950,6 +950,71 @@ cliff ever appears in the first 18, all 18 are kept. The result is clamped both 
 diversity-cap and token-budget pass right after it, so adaptive-k decides how deep the
 good evidence goes; diversity/budget then decides how that survives set gets distributed
 across techniques.
+
+<a id="s-running-summary"></a>
+#### Running summary: folding memory after the fact, not under pressure
+**Analogy.** Imagine keeping a running journal instead of re-reading your entire diary
+every time you want to remember what happened. The bad way to write a recap is to wait
+until the diary is already overflowing and you're rushed and scrambling — that's when
+you write the worst, sloppiest summary, right when you need a good one most. The better
+way: write a calm, unhurried recap right after closing today's page, while everything's
+still fresh, so tomorrow starts with a clean summary already waiting — never a panic-fold
+happening exactly when there's no room left to do it well.
+
+**Mechanics.** [`engine/advisor/context.rs`](app/src-tauri/src/engine/advisor/context.rs)
+keeps a sliding window of the last `RECENT_EXCHANGES = 3` exchanges verbatim; anything
+older is either already folded into `summaries` (an append-only log, one row per fold,
+keyed by `seq` = the last turn id it covers) or sitting "unfolded." `needs_summary_fold`
+checks if those unfolded turns exceed `SUMMARY_TRIGGER_TOKENS = 5_000` — and critically,
+this check happens in [`finish()`](app/src-tauri/src/engine/advisor/mod.rs) *after* the
+turn's reply is already saved and returned to the user. If a fold is needed, it's handed
+to `tokio::spawn` — a background async task — so summarizing (its own small-model call)
+never delays the answer on screen, and it runs with the full unfolded text available
+rather than being squeezed by a context budget that's already nearly exhausted.
+
+<a id="s-anti-repetition"></a>
+#### Anti-repetition: a checklist, not a re-read
+**Analogy.** Say you don't want to hand someone the same cookie twice. The clumsy way is
+to keep a paragraph description of every cookie you've served ("a delightfully chewy
+oatmeal-raisin with a hint of cinnamon...") and hope whoever's serving next reads back
+through all of it and correctly notices the overlap. The reliable way is a short
+checklist: *oatmeal-raisin — served. shortbread — served, they said too dry.* Two words
+per line, impossible to misread, trivial to check against before handing out the next
+one.
+
+**Mechanics.** After every turn, [`finish()`](app/src-tauri/src/engine/advisor/mod.rs)
+converts the advisory's recommendations into `AdvisorStateEntry { slug, pack_id, verdict }`
+— just an id and an outcome, no prose — and saves it to `conversation_state.advisor_state`.
+The next intake call's system context literally includes a line built from that list:
+`"Already recommended: {slug} ({verdict}), ..."` (`context.rs`'s `intake_messages`) — a
+handful of tokens instead of asking the model to re-parse its own past dossiers to infer
+what it already said. `candidate_pool` works the same way for evidence: the exact
+`doc_key`s of everything retrieved for a turn are saved, so a specific chunk or card that
+was already found is a known key, not something that has to be rediscovered by re-running
+search — fetching a known key by its id is a plain local lookup, no embedding or HNSW
+search involved.
+
+<a id="s-trace-replay"></a>
+#### Trace + offline replay: a black box, not a flight recording
+**Analogy.** Debugging why a flight was delayed doesn't require saving a full video of
+the cabin — a flight's black box records small structured facts (altitude, heading,
+timestamps, warnings), enough to reconstruct *what happened and why* without the storage
+cost of keeping everything. Separately: once a flight lands, the airline doesn't need to
+refly it to tell you how it went — the full report is already written down, ready to read
+back any time.
+
+**Mechanics.** Two different things are stored, for two different reasons.
+`context::write_trace` ([`context.rs`](app/src-tauri/src/engine/advisor/context.rs)) saves
+route, tier, the standalone query, retrieval **ids** (`evidence` doc-keys, `recommended`
+slugs — never the underlying chunk text, which stays in the immutable pack file), model
+names, latency, and validation counts into `turn_traces` — small enough that a turn's
+trace costs a few KB, useful for spotting bad routing or retrieval patterns without
+duplicating any corpus content. Separately, `insert_turn` saves the turn's **entire**
+`Advisory` object — serialized JSON, including `answer_md`, recommendations, evidence, and
+span citations — into the `turns` table. Opening an old conversation later just
+deserializes that JSON and renders it; there's no Cohere call, no re-retrieval, and no API
+key required — the exact answer that was generated is exactly what redisplays, unchanged,
+indefinitely, even with no internet connection at all.
 
 ---
 
