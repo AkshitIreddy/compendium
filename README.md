@@ -19,7 +19,8 @@ answers with cited, exportable knowledge dossiers.
 
 [Install](#-installation) · [How it works](#-how-it-works) · [Architecture](#-architecture) ·
 [The advisor pipeline](#-the-advisor-pipeline) · [Pack format](#-knowledge-pack-format) ·
-[Build pipeline](#-the-offline-build-pipeline) · [Contributing](docs/CONTRIBUTING.md)
+[Build pipeline](#-the-offline-build-pipeline) · [🍪 Simplified explanations](#-simplified-explanations) ·
+[Contributing](docs/CONTRIBUTING.md)
 
 <img src="assets/demo.webp" width="880" alt="Compendium demo — asking a use-case question, the pipeline stages running, the cited advisory rendering, and a citation opening its source notebook" />
 
@@ -217,6 +218,9 @@ sequenceDiagram
     E->>U: S9 advisory: cited dossier + cards + evidence (cached for follow-ups)
 ```
 
+> Wherever you see a 🍪 next to a technical mechanic below, click it — it jumps to a
+> plain-language, no-jargon explanation in **[🍪 Simplified explanations](#-simplified-explanations)**, near the end of this README.
+
 ### Stage by stage — what actually happens to your question
 
 Suppose you type: *"I'm building a support chatbot over our product docs. It has to run
@@ -283,30 +287,30 @@ relevant content; a fan of targeted sub-questions finds the coverage a real answ
 
 Every retrieval arm — standalone query, sub-questions, rewrites (plus, on Deep tier,
 the names of S0-matched failure modes) — is [embedded](#g-embedding) in **one batched API call**
-(`embed-v4.0` accepts up to 96 texts).
+[🍪](#s-batch-embed) (`embed-v4.0` accepts up to 96 texts).
 
 #### S3 — Retrieval fan-out *(local, ~10 ms per arm, no API)*
 
 Each arm now searches the packs **concurrently, on-device**. Per arm, per pack:
 
-1. **Dense**: the query vector searches two [usearch](#g-usearch) [HNSW](#g-hnsw) indexes — technique *cards*
+1. **Dense**: the query vector searches two [usearch](#g-usearch) [HNSW](#g-hnsw) indexes [🍪](#s-dense) — technique *cards*
    (the recommendation targets) and *chunks* (the evidence).
 2. **Sparse**: the same arm, sanitized into an FTS5 `MATCH` expression, runs [BM25](#g-bm25)
-   keyword search — catching exact terms, API names, and rare tokens that embeddings
+   keyword search [🍪](#s-sparse) — catching exact terms, API names, and rare tokens that embeddings
    blur.
-3. **Fusion**: the ranked lists merge via [Reciprocal Rank Fusion](#g-rrf) — a rank-based formula
+3. **Fusion**: the ranked lists merge via [Reciprocal Rank Fusion](#g-rrf) [🍪](#s-fusion) — a rank-based formula
    that needs no score calibration, which matters because cosine scores and BM25 scores
    live on incomparable scales. The S0 ontology shortlist joins as one more ranked list,
    so failure-mode knowledge is literally just *one voice among several*.
-4. **Graph expansion**: for the top fused cards, the engine walks the pack's typed
+4. **Graph expansion** [🍪](#s-graph): for the top fused cards, the engine walks the pack's typed
    relation graph one hop — `alternative_to`, `prerequisite_of`, `composes_with` — and
    adds neighbors similarity search under-ranks. This is where "you'll also need a
    reranker before segment extraction" and "X is the managed-service alternative to Y"
    come from.
 
-Results from all arms merge (a chunk found by three different sub-questions is a strong
+Results from all arms merge [🍪](#s-cross-arm) (a chunk found by three different sub-questions is a strong
 signal), and exact float32 cosine over the pack's stored vectors re-orders the fused
-candidates — fusion *selects*, exact similarity *ranks*.
+candidates — fusion *selects*, exact similarity *ranks* [🍪](#s-exact-rank).
 
 #### S4 — Rerank & select *(1 call)*
 
@@ -740,6 +744,85 @@ Extending Compendium — a new pack, a new source type (PDF papers?), a new advi
 stage — is a normal feature PR, not a plugin API. The seams, invariants, and worked
 examples are in **[docs/CONTRIBUTING.md](docs/CONTRIBUTING.md)**; the architecture
 rationale (with the research it rests on) is in **[docs/PLAN.md](docs/PLAN.md)**.
+
+---
+
+## 🍪 Simplified explanations
+
+The Glossary defines terms precisely. This section is the opposite: intuition first, no
+jargon, using one running analogy — a jar of cookies. Wherever a 🍪 sits next to a
+mechanic below, it jumps here to the plain-language version of *that specific thing*.
+
+<a id="s-batch-embed"></a>
+#### Why several questions become one API call
+Turning text into an embedding costs one network round-trip. A single turn generates
+several search queries — the question itself, a few sub-questions, a couple of rewrites.
+Sending each to Cohere separately would mean paying that round-trip cost repeatedly for
+no benefit, since the embedding model has no reason to process them one at a time.
+Cohere's endpoint accepts up to 96 texts per call, so every query for the turn is
+collected into one list first and embedded together — one request, one wait, an
+embedding for each.
+
+<a id="s-dense"></a>
+#### Dense search: usearch + HNSW
+Every technique card and document chunk gets "baked" into a cookie whose flavor is a
+list of numbers (its embedding) — cookies about similar topics taste similar. Comparing
+your question's flavor to *every* cookie in the jar, one by one, works but doesn't
+scale. **usearch** is the library holding the jar; **HNSW** is how it's organized —
+cookies linked to their nearest-flavor neighbors in a few loose layers, like a table of
+contents. To search, you land on a landmark cookie, hop to whichever connected cookie
+tastes closer to your question, and keep hopping — reaching the best matches after
+tasting a few dozen cookies instead of thousands.
+
+<a id="s-sparse"></a>
+#### Sparse search: BM25
+Flavor-matching (above) can blur together things that taste similar but aren't
+identical — it might not notice you asked for a very specific ingredient by name. BM25
+ignores flavor entirely and checks each cookie's recipe card for your *exact words*,
+scoring a match higher if the word is rare across the jar (a word almost every card has
+tells you nothing; a word almost none of them have is a strong signal). This is what
+catches exact class names, error codes, and jargon that flavor-matching smooths over.
+
+<a id="s-fusion"></a>
+#### Combining rankings: RRF
+Flavor-matching and recipe-card-matching hand back scores on completely different,
+incomparable scales — you can't add them together and trust the sum. Reciprocal Rank
+Fusion throws the scores away and keeps only each method's *order of preference*: 1st
+pick, 2nd pick, 3rd pick. A cookie earns points for how high it ranked on each list it
+appeared on, and the points from every list it's on get added up. A cookie two different
+methods both liked beats one only a single method loved — agreement matters more than
+any one method's confidence.
+
+<a id="s-graph"></a>
+#### Graph expansion
+Flavor and recipe-card matching only ever find cookies that resemble your question. They
+can never surface "you'll also want the milk that goes with this cookie," because milk
+doesn't taste like a cookie. The jar also has labeled strings tied between specific
+cookies — "goes with," "do this one first," "swap for this instead." After the best
+matches are picked, the engine follows those strings one hop out and pulls in whatever's
+tied to the other end, discounted in confidence since it wasn't found by taste — just by
+a known relationship.
+
+<a id="s-exact-rank"></a>
+#### Fusion picks the shortlist, exact math orders it
+Two separate jobs. Fusion's job is deciding *which* cookies make the cut at all — casting
+votes from every method to build a shortlist. Once that shortlist exists, the engine goes
+back to the *original, full-precision* flavor numbers (the fast search index stores a
+lighter, compressed copy) and recomputes the real closeness for just those few
+candidates, then sorts by that. Fusion decides who's in the room; exact math decides who
+speaks first.
+
+<a id="s-cross-arm"></a>
+#### Merging every question's results into one list
+A single turn runs the whole cookie-jar search once *per* generated query — the main
+question, each sub-question, each rewrite — not just once. Every one of those searches
+feeds the same two running tallies, one for candidate cookies (cards) and one for
+candidate recipe excerpts (evidence): a cookie's score keeps accumulating each time a
+different query's search turns it up, and an excerpt keeps whichever search found the
+closest match for it. A cookie that three separately-worded questions all landed on is a
+far stronger signal than one only the most literal phrasing happened to find — by the
+time every query has run, what's left is one merged, ranked list, not several separate
+ones.
 
 ---
 
