@@ -29,14 +29,20 @@ const tl = timeline((t) => {
   // open a cited source: the technique card, then its source notebook
   t.click("button.citation-mark", { via: "cursor" });
   t.waitFor('aside[aria-label="Source panel"]');
-  t.hold(1.4);
-  t.scroll('aside[aria-label="Source panel"] .overflow-y-auto', 380, 2.4);
-  t.hold(0.8);
+  t.hold(1.3);
   t.click("aside button.w-fit", { via: "cursor" }); // Open source notebook →
   t.waitFor("[data-cell]");
-  t.hold(1.0);
-  t.scroll('aside[aria-label="Source panel"] .overflow-y-auto', 420, 2.6);
-  t.hold(0.8);
+  t.hold(1.1);
+
+  // panels resize by dragging, and the source panel goes full-window
+  t.drag('div[aria-label="Resize source panel"]', { dx: -170 }, 1.2);
+  t.hold(0.7);
+  t.click('button[aria-label="Expand source panel"]', { via: "cursor" });
+  t.hold(0.9);
+  t.scroll('aside[aria-label="Source panel"] .overflow-y-auto', 440, 2.4);
+  t.hold(0.7);
+  t.click('button[aria-label="Restore source panel"]', { via: "cursor" });
+  t.hold(0.5);
   t.click('button[aria-label="Close source panel"]', { via: "cursor" });
   t.hold(0.6);
 
@@ -53,5 +59,5 @@ export default {
   stage: { title: "Compendium", os: "windows" },
   props: [taskbar({ os: "windows" }), cursor()],
   timeline: tl,
-  encode: { width: 880, fps: 14, speed: 1.3, colors: 96, targetMB: 4 },
+  encode: { width: 840, fps: 14, speed: 1.2, colors: 96, targetMB: 4 },
 };
