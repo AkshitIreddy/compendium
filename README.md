@@ -749,80 +749,169 @@ rationale (with the research it rests on) is in **[docs/PLAN.md](docs/PLAN.md)**
 
 ## 🍪 Simplified explanations
 
-The Glossary defines terms precisely. This section is the opposite: intuition first, no
-jargon, using one running analogy — a jar of cookies. Wherever a 🍪 sits next to a
-mechanic below, it jumps here to the plain-language version of *that specific thing*.
+The Glossary defines terms precisely. This section is different: each entry starts with
+one running analogy — a jar of cookies — to build intuition, then drops the analogy and
+gives the actual mechanics (the real formula, the real constants, the real code) behind
+it. Wherever a 🍪 sits next to a mechanic below, it jumps here.
 
 <a id="s-batch-embed"></a>
 #### Why several questions become one API call
-Turning text into an embedding costs one network round-trip. A single turn generates
-several search queries — the question itself, a few sub-questions, a couple of rewrites.
-Sending each to Cohere separately would mean paying that round-trip cost repeatedly for
-no benefit, since the embedding model has no reason to process them one at a time.
-Cohere's endpoint accepts up to 96 texts per call, so every query for the turn is
-collected into one list first and embedded together — one request, one wait, an
-embedding for each.
+**Analogy.** Turning text into an embedding costs one network round-trip. A single turn
+generates several search queries — the question itself, a few sub-questions, a couple of
+rewrites. Sending each to Cohere separately would mean paying that round-trip cost
+repeatedly for no benefit, since the embedding model has no reason to process them one at
+a time. So every query for the turn is collected into one list first and embedded
+together — one request, one wait, an embedding for each.
+
+**Mechanics.** [`engine/advisor/mod.rs`](app/src-tauri/src/engine/advisor/mod.rs) builds a
+plain `Vec<String>` — the standalone query, the planner's sub-questions, its rewrites, and
+on Deep tier the names of S0-matched failure modes — deduplicates it, caps it at 9, and
+hands the whole vector to `CohereClient::embed_queries` in
+[`engine/cohere.rs`](app/src-tauri/src/engine/cohere.rs). That function makes exactly one
+`POST /v2/embed` with `"texts": [...]` holding every arm and `"model": "embed-v4.0"`
+(which accepts up to 96 texts per call — 9 arms fits with headroom). Cohere returns one
+vector per text, same order in as out, so `arm_vecs[i]` is the embedding for `arms[i]`.
+`counts.embed` increments by exactly 1 for the whole turn, regardless of how many arms the
+planner generated.
 
 <a id="s-dense"></a>
 #### Dense search: usearch + HNSW
-Every technique card and document chunk gets "baked" into a cookie whose flavor is a
-list of numbers (its embedding) — cookies about similar topics taste similar. Comparing
-your question's flavor to *every* cookie in the jar, one by one, works but doesn't
-scale. **usearch** is the library holding the jar; **HNSW** is how it's organized —
-cookies linked to their nearest-flavor neighbors in a few loose layers, like a table of
+**Analogy.** Every technique card and document chunk gets "baked" into a cookie whose
+flavor is a list of numbers (its embedding) — cookies about similar topics taste similar.
+Comparing your question's flavor to *every* cookie in the jar, one by one, works but
+doesn't scale. **usearch** is the library holding the jar; **HNSW** is how it's organized
+— cookies linked to their nearest-flavor neighbors in a few loose layers, like a table of
 contents. To search, you land on a landmark cookie, hop to whichever connected cookie
 tastes closer to your question, and keep hopping — reaching the best matches after
 tasting a few dozen cookies instead of thousands.
 
+**Mechanics.** usearch is a real Rust/C++ crate ([unum-cloud/usearch](https://github.com/unum-cloud/usearch)); each loaded pack holds two of its `Index` structs — `cards_index` and
+`chunks_index` ([`engine/pack.rs`](app/src-tauri/src/engine/pack.rs), built with
+`metric: MetricKind::Cos`). Every arm's query vector calls `pack.cards_index.search(q, 20)`
+and `pack.chunks_index.search(q, 50)` ([`engine/search.rs`](app/src-tauri/src/engine/search.rs)) — real HNSW graph traversal, not a
+loop over every vector. Build-time knobs from each pack's `recipe.toml` `[index]` section
+tune the graph directly: `connectivity` (neighbor links per node — accuracy vs. index size),
+`expansion_add` (search effort *while inserting* a node) and `expansion_search` (search
+effort *per query*), `quantization = "f16"` (vectors stored as 16-bit floats to halve
+memory), and `recall_gate = 0.98` — a build-time check that the approximate HNSW graph
+still finds ≥98% of what an exact brute-force search would, or the pack build fails.
+
 <a id="s-sparse"></a>
 #### Sparse search: BM25
-Flavor-matching (above) can blur together things that taste similar but aren't
-identical — it might not notice you asked for a very specific ingredient by name. BM25
-ignores flavor entirely and checks each cookie's recipe card for your *exact words*,
+**Analogy.** Flavor-matching (above) can blur together things that taste similar but
+aren't identical — it might not notice you asked for a very specific ingredient by name.
+BM25 ignores flavor entirely and checks each cookie's recipe card for your *exact words*,
 scoring a match higher if the word is rare across the jar (a word almost every card has
 tells you nothing; a word almost none of them have is a strong signal). This is what
 catches exact class names, error codes, and jargon that flavor-matching smooths over.
 
+**Mechanics.** BM25 is the ranking formula behind SQLite's FTS5 full-text index, prebuilt
+into every pack at build time (`cards_fts`, `chunks_fts` tables) — no runtime indexing
+cost. Each arm's text is sanitized into a safe `MATCH` expression (special FTS5 syntax
+characters stripped, terms quoted) and run as `SELECT ... WHERE cards_fts MATCH ?1 ORDER
+BY rank LIMIT 20` (and the equivalent for chunks, limit 50) in
+[`engine/search.rs`](app/src-tauri/src/engine/search.rs). SQLite's `rank` column *is* the
+BM25 score — term-frequency in the document, offset by how rare that term is across the
+whole corpus, with length-normalization so a document can't win just by repeating a word.
+
 <a id="s-fusion"></a>
 #### Combining rankings: RRF
-Flavor-matching and recipe-card-matching hand back scores on completely different,
-incomparable scales — you can't add them together and trust the sum. Reciprocal Rank
-Fusion throws the scores away and keeps only each method's *order of preference*: 1st
-pick, 2nd pick, 3rd pick. A cookie earns points for how high it ranked on each list it
-appeared on, and the points from every list it's on get added up. A cookie two different
-methods both liked beats one only a single method loved — agreement matters more than
-any one method's confidence.
+**Analogy.** Flavor-matching and recipe-card-matching hand back scores on completely
+different, incomparable scales — you can't add them together and trust the sum.
+Reciprocal Rank Fusion throws the scores away and keeps only each method's *order of
+preference*: 1st pick, 2nd pick, 3rd pick. A cookie earns points for how high it ranked on
+each list it appeared on, and the points from every list it's on get added up. A cookie
+two different methods both liked beats one only a single method loved — agreement matters
+more than any one method's confidence.
+
+**Mechanics.** The actual formula, verbatim from
+[`engine/search.rs`](app/src-tauri/src/engine/search.rs):
+
+```rust
+const RRF_K: f64 = 60.0;
+
+fn rrf_fuse(rank_lists: &[Vec<u64>]) -> HashMap<u64, f64> {
+    let mut scores: HashMap<u64, f64> = HashMap::new();
+    for list in rank_lists {
+        for (rank, key) in list.iter().enumerate() {
+            *scores.entry(*key).or_default() += 1.0 / (RRF_K + rank as f64 + 1.0);
+        }
+    }
+    scores
+}
+```
+
+Rank 1 in a list contributes `1/61 ≈ 0.0164`; rank 10 contributes `1/71 ≈ 0.0141` — barely
+less. The `+60` deliberately flattens the curve so being #1 vs #10 on one list matters far
+less than showing up near the top of *two* lists at all. `card_lists`/`chunk_lists` are
+just `Vec<Vec<u64>>` — the dense list, the BM25 list, and the S0 ontology shortlist (as its
+own ranked list of technique slugs) all get pushed into the same vector and fused with one
+call to `rrf_fuse`, so the ontology voice has no special weight — it wins or loses exactly
+like any other list.
 
 <a id="s-graph"></a>
 #### Graph expansion
-Flavor and recipe-card matching only ever find cookies that resemble your question. They
-can never surface "you'll also want the milk that goes with this cookie," because milk
-doesn't taste like a cookie. The jar also has labeled strings tied between specific
-cookies — "goes with," "do this one first," "swap for this instead." After the best
-matches are picked, the engine follows those strings one hop out and pulls in whatever's
-tied to the other end, discounted in confidence since it wasn't found by taste — just by
-a known relationship.
+**Analogy.** Flavor and recipe-card matching only ever find cookies that resemble your
+question. They can never surface "you'll also want the milk that goes with this cookie,"
+because milk doesn't taste like a cookie. The jar also has labeled strings tied between
+specific cookies — "goes with," "do this one first," "swap for this instead." After the
+best matches are picked, the engine follows those strings one hop out and pulls in
+whatever's tied to the other end, discounted in confidence since it wasn't found by taste
+— just by a known relationship.
+
+**Mechanics.** The "strings" are rows in a `technique_relations` table
+(`from_slug, relation, to_slug`) baked into the pack, with relation types
+`alternative_to`, `prerequisite_of`, `composes_with`, `refines`, `evaluated_by`. For the
+top 6 fused cards per pack, [`engine/search.rs`](app/src-tauri/src/engine/search.rs) runs
+`SELECT r.to_slug, r.relation, ... FROM technique_relations r WHERE r.from_slug = ?1` and
+adds every neighbor not already present, with `score: parent_score * 0.4` — a flat 40%
+of the parent's fused score, so an expanded neighbor can join the result set but can't
+outrank cards that dense or keyword search found on their own merit. Each expanded card
+also stores `expanded_from: Some((relation, parent_slug))`, which is what lets the
+synthesis prompt say *"X is the managed-service alternative to Y"* instead of silently
+mixing it into the pile.
 
 <a id="s-exact-rank"></a>
 #### Fusion picks the shortlist, exact math orders it
-Two separate jobs. Fusion's job is deciding *which* cookies make the cut at all — casting
-votes from every method to build a shortlist. Once that shortlist exists, the engine goes
-back to the *original, full-precision* flavor numbers (the fast search index stores a
-lighter, compressed copy) and recomputes the real closeness for just those few
-candidates, then sorts by that. Fusion decides who's in the room; exact math decides who
-speaks first.
+**Analogy.** Two separate jobs. Fusion's job is deciding *which* cookies make the cut at
+all — casting votes from every method to build a shortlist. Once that shortlist exists,
+the engine goes back to the *original, full-precision* flavor numbers (the fast search
+index stores a lighter, compressed copy) and recomputes the real closeness for just those
+few candidates, then sorts by that. Fusion decides who's in the room; exact math decides
+who speaks first.
+
+**Mechanics.** The HNSW index is stored quantized (`f16`) for speed and size; the pack
+also keeps a separate full-precision `f32` "vectors of record" copy on disk. After RRF
+fusion produces a shortlist, [`engine/search.rs`](app/src-tauri/src/engine/search.rs)'s
+`exact_cosine` re-reads the `f32` vector for each shortlisted item and computes a real dot
+product against the query. The two candidate types are then sorted differently on
+purpose: cards sort by fusion score first, exact cosine as tiebreaker (so the ontology and
+graph voices genuinely influence *which techniques get recommended*); chunks — the
+evidence — sort by exact cosine first, fusion score as tiebreaker (so, once a chunk is a
+candidate at all, the truest similarity measurement picks which excerpt gets quoted).
 
 <a id="s-cross-arm"></a>
 #### Merging every question's results into one list
-A single turn runs the whole cookie-jar search once *per* generated query — the main
-question, each sub-question, each rewrite — not just once. Every one of those searches
-feeds the same two running tallies, one for candidate cookies (cards) and one for
+**Analogy.** A single turn runs the whole cookie-jar search once *per* generated query —
+the main question, each sub-question, each rewrite — not just once. Every one of those
+searches feeds the same two running tallies, one for candidate cookies (cards) and one for
 candidate recipe excerpts (evidence): a cookie's score keeps accumulating each time a
 different query's search turns it up, and an excerpt keeps whichever search found the
 closest match for it. A cookie that three separately-worded questions all landed on is a
-far stronger signal than one only the most literal phrasing happened to find — by the
-time every query has run, what's left is one merged, ranked list, not several separate
-ones.
+far stronger signal than one only the most literal phrasing happened to find — by the time
+every query has run, what's left is one merged, ranked list, not several separate ones.
+
+**Mechanics.** `retrieve_merged` in
+[`engine/advisor/mod.rs`](app/src-tauri/src/engine/advisor/mod.rs) loops over every arm,
+calling the single-arm `search()` (dense + sparse + fusion + graph expansion, all of the
+above) once per arm, and folds each result into two `HashMap`s keyed by `pack_id:slug`
+(cards) and `pack_id:chunk_id` (chunks) that live *outside* the loop. For cards, each
+appearance adds to a running `fusion_score` and increments `arms_hit`; for chunks, the map
+keeps whichever arm produced the highest `exact_cosine`, since a chunk's true relevance
+doesn't change per arm — only the measurement's quality might. Once every arm has run, the
+maps are flattened, sorted (cards by `fusion_score` then `arms_hit`, capped to 14; evidence
+by best cosine, capped to 40), and that single flattened list is what S4 reranking receives
+— not one arm's answer, a fold of all of them.
 
 ---
 
