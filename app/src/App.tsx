@@ -30,6 +30,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [source, setSource] = useState<SourceRequest | null>(null);
+  const [sourceFullscreen, setSourceFullscreen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [keyStatus, setKeyStatus] = useState<KeyStatus | null>(null);
   const [showKeySetup, setShowKeySetup] = useState(false);
@@ -244,18 +245,33 @@ export default function App() {
 
       {source && (
         <>
-          <ResizeHandle
-            ariaLabel="Resize source panel"
-            onDrag={(dx) => setLiveSourceW((w) => (w ?? settings.sourcePanelWidth) - dx)}
-            onCommit={() => {
-              if (liveSourceW != null) {
-                update("sourcePanelWidth", Math.min(Math.max(liveSourceW, 320), 760));
-                setLiveSourceW(null);
-              }
-            }}
-          />
-          <div style={{ width: sourceW }} className="flex shrink-0">
-            <SourcePanel request={source} onClose={() => setSource(null)} />
+          {!sourceFullscreen && (
+            <ResizeHandle
+              ariaLabel="Resize source panel"
+              onDrag={(dx) => setLiveSourceW((w) => (w ?? settings.sourcePanelWidth) - dx)}
+              onCommit={() => {
+                if (liveSourceW != null) {
+                  update("sourcePanelWidth", Math.min(Math.max(liveSourceW, 320), 760));
+                  setLiveSourceW(null);
+                }
+              }}
+            />
+          )}
+          {/* one persistent instance: expanding must never reset the reader's
+              view or scroll position, so only the wrapper changes */}
+          <div
+            style={sourceFullscreen ? undefined : { width: sourceW }}
+            className={sourceFullscreen ? "fixed inset-0 z-30 flex bg-app" : "flex shrink-0"}
+          >
+            <SourcePanel
+              request={source}
+              onClose={() => {
+                setSource(null);
+                setSourceFullscreen(false);
+              }}
+              fullscreen={sourceFullscreen}
+              onToggleFullscreen={() => setSourceFullscreen((f) => !f)}
+            />
           </div>
         </>
       )}

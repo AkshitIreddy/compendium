@@ -119,9 +119,13 @@ function TechniqueDetail({
 export function SourcePanel({
   request,
   onClose,
+  fullscreen = false,
+  onToggleFullscreen,
 }: {
   request: SourceRequest;
   onClose: () => void;
+  fullscreen?: boolean;
+  onToggleFullscreen?: () => void;
 }) {
   const [technique, setTechnique] = useState<Technique | null>(null);
   const [doc, setDoc] = useState<PackDocument | null>(null);
@@ -134,6 +138,17 @@ export function SourcePanel({
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
   }, [request, view]);
+
+  // Esc restores from fullscreen first, then closes the panel.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      if (fullscreen) onToggleFullscreen?.();
+      else onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [fullscreen, onToggleFullscreen, onClose]);
 
   useEffect(() => {
     let cancelled = false;
@@ -211,14 +226,37 @@ export function SourcePanel({
             {doc?.title ?? technique?.title ?? "Source"}
           </span>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Close source panel"
-          className="rounded-[length:var(--radius-sm)] px-2 py-1 text-secondary transition-token hover:bg-inset hover:text-primary"
-        >
-          ✕
-        </button>
+        <div className="flex items-center gap-0.5">
+          {onToggleFullscreen && (
+            <button
+              type="button"
+              onClick={onToggleFullscreen}
+              aria-label={fullscreen ? "Restore source panel" : "Expand source panel"}
+              title={fullscreen ? "Restore (Esc)" : "Expand to full window"}
+              className="rounded-[length:var(--radius-sm)] px-2 py-1 text-secondary transition-token hover:bg-inset hover:text-primary"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                {fullscreen ? (
+                  <>
+                    <path d="M9 4v5H4" /><path d="M15 4v5h5" /><path d="M9 20v-5H4" /><path d="M15 20v-5h5" />
+                  </>
+                ) : (
+                  <>
+                    <path d="M4 9V4h5" /><path d="M20 9V4h-5" /><path d="M4 15v5h5" /><path d="M20 15v5h-5" />
+                  </>
+                )}
+              </svg>
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close source panel"
+            className="rounded-[length:var(--radius-sm)] px-2 py-1 text-secondary transition-token hover:bg-inset hover:text-primary"
+          >
+            ✕
+          </button>
+        </div>
       </header>
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto p-[length:var(--sp-4)]">
