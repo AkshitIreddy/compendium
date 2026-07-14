@@ -36,7 +36,7 @@
     "@vitejs/plugin-react": "^4.6.0",
     "axe-core": "^4.12.1",
     "culori": "^4.0.2",
-    "gifsmith": "^0.1.0",
+    "gifsmith": "^0.2.0",
     "typescript": "~5.8.3",
     "vite": "^7.0.4",
     "vitest": "^4.1.10"
