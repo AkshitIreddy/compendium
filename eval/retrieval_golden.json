@@ -1,0 +1,53 @@
+{
+  "description": "Retrieval golden set: each case pairs a realistic user query with the technique card slugs that are correct answers for it. Slugs must exist in packs-out/rag-techniques.pack. Scored by eval_retrieval.rs (hit@5, recall@10, MRR).",
+  "cases": [
+    {
+      "query": "I want keyword search and vector search combined so exact error codes and product names still match",
+      "expected": ["fusion_retrieval", "fusion_retrieval_with_llamaindex"]
+    },
+    {
+      "query": "The right passage is retrieved but buried around rank 12 — how do I push it to the top?",
+      "expected": ["reranking", "reranking_with_llamaindex"]
+    },
+    {
+      "query": "Retrieved chunks feel fragmented, the model is missing the surrounding sentences from the page",
+      "expected": ["context_enrichment_window_around_chunk", "relevant_segment_extraction"]
+    },
+    {
+      "query": "How should I pick a chunk size? Fixed 500-token chunks feel arbitrary for my documents",
+      "expected": ["choose_chunk_size", "semantic_chunking"]
+    },
+    {
+      "query": "Questions need connecting facts across many documents — relationships between entities matter",
+      "expected": ["graph_rag", "microsoft_graphrag"]
+    },
+    {
+      "query": "How do I measure whether my RAG pipeline is actually getting better over time?",
+      "expected": ["define_evaluation_metrics", "end-2-end_rag_evaluation", "evaluation_deep_eval"]
+    },
+    {
+      "query": "The model hallucinates confidently when the retrieved chunks don't actually contain the answer",
+      "expected": ["reliable_rag", "crag", "self_rag"]
+    },
+    {
+      "query": "User queries are short and vague and retrieval misses — should I rewrite or expand them first?",
+      "expected": ["query_transformations", "hyde_hypothetical_document_embedding"]
+    },
+    {
+      "query": "Large corpus of long reports — I want retrieval to work from summaries down into the details",
+      "expected": ["raptor", "hierarchical_indices"]
+    },
+    {
+      "query": "My PDFs are full of charts and images that users ask questions about",
+      "expected": ["multi_model_rag_with_captioning", "multi_model_rag_with_colpali"]
+    },
+    {
+      "query": "I want the system to decide on its own when to retrieve versus answer directly, more agent-like",
+      "expected": ["agentic_rag", "adaptive_retrieval", "self_rag"]
+    },
+    {
+      "query": "Question answering over CSV tables of structured product data",
+      "expected": ["simple_csv_rag", "simple_csv_rag_with_llamaindex"]
+    }
+  ]
+}

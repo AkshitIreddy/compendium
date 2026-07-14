@@ -1,0 +1,10 @@
+# Generation-eval dependencies (isolated venv — do NOT install into pipeline/.venv).
+# Setup:  python -m venv eval/.venv && eval/.venv/Scripts/pip install -r eval/requirements.txt
+#
+# DeepEval was chosen over ragas: actively maintained, no langchain dependency
+# (the judge talks to Cohere through the plain cohere SDK), and the corpus
+# literally ships an `evaluation_deep_eval` technique card — the harness
+# dogfoods a technique the app recommends.
+deepeval>=2.0
+cohere>=5.0
+python-dotenv>=1.0

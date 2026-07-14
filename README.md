@@ -718,6 +718,12 @@ The same bar, on purpose: the most polished products are also the most accessibl
 | Engine (live) | `cargo test -- --ignored`: full S1→S9 Balanced advisory + follow-up on the trial key (~10 calls), asserting citations, recommendations, and export integrity |
 | UI | `vitest` (60 contrast assertions), `tsc --noEmit`, axe audits |
 | Adversarial | A 27-agent review swept engine/pipeline/UI/security dimensions; every finding was independently verified against the code before fixing — 19 confirmed, 19 fixed |
+| Quality ([evals](#g-eval)) | [`eval/`](eval): a [golden-set](#g-golden-set) retrieval eval (hit@5 **1.000**, recall@10 **1.000**, [MRR](#g-mrr) **0.674**) plus a [DeepEval](#g-deepeval) generation eval ([faithfulness](#g-faithfulness) **0.984**, answer relevancy **0.989**, [LLM-as-judge](#g-llm-judge)) — local, on-demand, deliberately small; baselines & limitations in [eval/README.md](eval/README.md) |
+
+Tests check the machinery *works*; the eval harness [🍪](#s-eval) measures whether what it
+retrieves and writes is any *good* — scored against an answer key and an LLM judge
+rather than assertions. It runs locally on demand (never in CI: it spends live API
+calls and judged scores vary run to run).
 
 ---
 
@@ -738,6 +744,10 @@ COMPENDIUM_PACKS_DIR=../packs-out npm run tauri dev
 cd src-tauri && cargo test              # engine (needs built packs)
 cd .. && npx vitest run                 # UI + contrast matrix
 npm run tauri build                     # NSIS installer → bundles packs-out/
+
+# 4. Evals (optional, spends trial-key calls — see eval/README.md)
+cd src-tauri && cargo test --test eval_retrieval -- --ignored --nocapture
+cd ../.. && eval/.venv/Scripts/python eval/deepeval_eval.py
 ```
 
 Extending Compendium — a new pack, a new source type (PDF papers?), a new advisor
@@ -1016,6 +1026,37 @@ deserializes that JSON and renders it; there's no Cohere call, no re-retrieval, 
 key required — the exact answer that was generated is exactly what redisplays, unchanged,
 indefinitely, even with no internet connection at all.
 
+<a id="s-eval"></a>
+#### Evals: tasting the cookies on purpose
+**Analogy.** Testing checks that the jar opens, the strings don't snap, and nobody
+crashes into the shelf — the *mechanism*. An eval asks the question testing can't: when
+someone asked for a chocolate-chip cookie, did we actually hand them a good one, and did
+we describe it honestly? For the picking half, you write an answer key in advance — for
+each request, which cookies are the right ones — then check what was actually grabbed
+against it: did a right cookie make the top of the plate (hit rate)? did we find all of
+them (recall)? how far down was the first right one (MRR)? For the describing half
+there's no answer key that can work — "is this description honest" isn't a string
+comparison — so a separate taster reads the request, the cookies handed over, and the
+description, and grades it: does every claim match a cookie that's actually on the plate
+(faithfulness)? does the description answer what was asked (relevancy)?
+
+**Mechanics.** Lives in [`eval/`](eval). Retrieval half:
+[`retrieval_golden.json`](eval/retrieval_golden.json) holds 12 queries with
+expected-technique answer keys; a Rust test
+([`eval_retrieval.rs`](app/src-tauri/tests/eval_retrieval.rs)) embeds all queries in one
+batched call, runs each through the same hybrid `search()` the app uses, and computes
+hit@5 / recall@10 / MRR — with floor `assert!`s so future regressions fail the test.
+Generation half: 6 questions run through the real Balanced advisor; the resulting
+(question, answer, evidence) triples are scored by
+[DeepEval](https://github.com/confident-ai/deepeval) in
+[`deepeval_eval.py`](eval/deepeval_eval.py) on faithfulness and answer relevancy, with
+`command-a-03-2025` as the judge model (talking to Cohere through the plain SDK — no
+langchain). Pleasingly, `evaluation_deep_eval` is itself one of the 44 technique cards
+in the pack — the harness dogfoods a technique the app recommends. Baseline (2026-07-14):
+hit@5 1.000 / recall@10 1.000 / MRR 0.674 on retrieval; faithfulness 0.984 / answer
+relevancy 0.989 on generation. Details and honest limitations are in
+[`eval/README.md`](eval/README.md).
+
 ---
 
 ## 📖 Glossary
@@ -1086,6 +1127,57 @@ pipeline's recall gate and exact re-scoring.
 Of the true 10 nearest vectors (found by exhaustive exact search), how many the
 approximate index actually returned. Pack builds fail if this drops below 0.98 —
 a shipped index is never silently worse than exact search.
+
+<a id="g-eval"></a>
+#### Eval (evaluation harness)
+Measuring the *quality* of a RAG system's outputs — did retrieval find the right things,
+is the answer grounded and on-topic — as opposed to testing, which checks the machinery
+works. Quality isn't assertable with `assert_eq`, so evals score against an answer key
+(retrieval) or an [LLM judge](#g-llm-judge) (generation). Compendium's lives in
+[`eval/`](eval).
+
+<a id="g-golden-set"></a>
+#### Golden set
+The hand-written answer key an eval scores against: a fixed list of test queries, each
+with the outputs a human decided are correct (here: which technique cards should be
+retrieved). Without one, retrieval metrics literally cannot be computed. Curating it is
+iterative — when the system surfaces a genuinely correct answer the key missed, the key
+gets fixed, not the system.
+
+<a id="g-mrr"></a>
+#### Hit@k / MRR
+Retrieval-quality metrics over a golden set. **Hit@k**: for what fraction of queries did
+at least one correct item appear in the top k? **MRR** (mean reciprocal rank): on
+average, how high did the *first* correct item rank — 1/1 for rank 1, 1/2 for rank 2,
+and so on, averaged across queries. Hit@k measures "did we find it at all"; MRR measures
+"how far down was it."
+
+<a id="g-deepeval"></a>
+#### DeepEval
+An actively-maintained open-source library of pre-built RAG evaluation metrics
+([github.com/confident-ai/deepeval](https://github.com/confident-ai/deepeval)), computed
+via [LLM-as-judge](#g-llm-judge) prompts — so faithfulness, answer relevancy and friends
+don't have to be reinvented per project. Compendium's generation eval
+([`eval/deepeval_eval.py`](eval/deepeval_eval.py)) uses it with Cohere's flagship model
+as the judge, wrapped directly over the plain Cohere SDK. (RAGAS and TruLens are the
+common alternatives; DeepEval won on maintenance, zero langchain dependency, and the
+fact that the pack's own `evaluation_deep_eval` card recommends it.)
+
+<a id="g-llm-judge"></a>
+#### LLM-as-judge
+Using a language model to grade outputs against a rubric ("is every claim here supported
+by the evidence? list the ones that aren't") — the trick that makes quality metrics like
+faithfulness computable at scale, where they'd otherwise need a human reading every
+answer. Imperfect (judges have biases and variance) but repeatable and cheap enough to
+run on every change.
+
+<a id="g-faithfulness"></a>
+#### Faithfulness / answer relevancy
+The two reference-free generation metrics in Compendium's eval. **Faithfulness**: what
+fraction of the answer's claims are supported by the retrieved evidence it was given —
+the direct measure of hallucination. **Answer relevancy**: does the answer actually
+address the question asked, rather than being faithful-but-beside-the-point. Both need
+no hand-written ideal answer, which keeps the eval cheap to extend.
 
 <a id="g-quantization"></a>
 #### Quantization (f16)

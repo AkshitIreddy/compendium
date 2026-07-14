@@ -1,0 +1,11 @@
+{
+  "description": "Questions for the generation-side eval. Each runs through the real advisor pipeline (Balanced tier); the resulting (question, answer, retrieved contexts) triples are scored by DeepEval in deepeval_eval.py. Keep questions unambiguous — ones that legitimately need clarification can't produce a scorable answer.",
+  "questions": [
+    "I'm building a support chatbot over 3,000 product docs. It must run on-prem and handle follow-up questions. What retrieval setup should I use?",
+    "My RAG bot retrieves chunks that mention the right keywords, but irrelevant chunks are crowding the context window and diluting the answers. What should I fix first?",
+    "Planning RAG over legal contracts where exact clause citations are mandatory. How do I keep answers grounded?",
+    "We have huge engineering wikis with very long pages. Retrieved fragments are cut off mid-thought and missing the surrounding sections they need to make sense. What techniques help?",
+    "How should I evaluate my RAG pipeline before shipping it to customers?",
+    "docs r a mess, half pdfs half markdown, users ask random stuff and answers are meh. what do"
+  ]
+}

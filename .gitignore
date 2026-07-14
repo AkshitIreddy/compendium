@@ -13,6 +13,10 @@ pipeline/.cache/
 __pycache__/
 *.pyc
 
+# Eval harness (scripts + golden sets are committed; outputs are not)
+eval/.venv/
+eval/out/
+
 # Built pack artifacts (shipped via installer, not the repo)
 packs-out/
 
